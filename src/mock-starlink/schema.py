@@ -111,7 +111,7 @@ class StarlinkPayloadIn(BaseModel):
 # ---------------------------------------------------------------------------
 # Ejemplo de uso / smoke test manual
 # ---------------------------------------------------------------------------
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     ejemplo_valido = {
         "schema_version": "1.0",
         "node_id": "lit-cordoba-01",
@@ -144,3 +144,4 @@ if __name__ == "__main__":
         StarlinkPayloadIn.model_validate(invalido)
     except Exception as e:
         print(f"\nOK: paquete inválido correctamente rechazado -> {e}")
+        
