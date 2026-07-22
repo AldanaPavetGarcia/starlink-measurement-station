@@ -29,5 +29,8 @@ coverage.xml
 .DS_Store
 Thumbs.db
 
+# Claude Code - override local de permisos, no versionar
+.claude/settings.local.json
+
 # Docker (cuando aparezca en semana 3+)
 *.log
