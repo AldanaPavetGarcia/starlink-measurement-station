@@ -70,10 +70,15 @@ por la tabla).
      entradas existentes (Contexto, Decisión, Alternativas rechazadas, Estado:
      Propuesto). **Nunca dejar la discrepancia sin reflejar en los docs.**
    - **(c) Conflicto preexistente entre documentos** (el código no lo causó — ej. SRS
-     vs. DER) — no hay un "documento correcto" obvio para copiar. → Señalar
-     explícitamente para el director/co-director (ver `CLAUDE.md` §12, "Decisiones
-     pendientes"), dejar anotado en `docs/PROGRESS.md` o similar, y **no resolverlo
-     unilateralmente**.
+     vs. DER) — no hay un "documento correcto" obvio para copiar. → Antes de bloquear,
+     revisar si `docs/PROGRESS.md` ya tiene una nota reconociendo ese conflicto puntual
+     (buscar una sección tipo "Pendiente — revisar con director" que mencione los
+     mismos documentos/campos). **Si ya está anotado ahí, no bloquear** — dejarlo pasar
+     con un aviso informativo (no bloqueante) de que es un issue ya trackeado. Si NO
+     está anotado todavía, ahí sí bloquear y señalar explícitamente para el
+     director/co-director (ver `CLAUDE.md` §12, "Decisiones pendientes"), pidiendo que
+     se dockumente en `docs/PROGRESS.md` antes de reintentar. Nunca resolverlo
+     unilateralmente editando SRS o DER para que coincidan.
 5. **Reportar** agrupado por clasificación (a)/(b)/(c), citando archivo:línea de cada
    documento y del código involucrado.
 
