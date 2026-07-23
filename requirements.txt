@@ -1,3 +1,8 @@
 pydantic>=2.7,<3
 pytest>=8.0
 pytest-cov>=5.0
+
+# grpcio: todavía no se usa en código (se incorpora en Semana 10, al reemplazar el
+# mock por la conexión gRPC real a la antena, 192.168.100.1:9200). Se pinea ahora
+# porque el roadmap de Semana 2 (CLAUDE.md §1.1) pide dejar el entorno listo.
+grpcio>=1.60,<2
