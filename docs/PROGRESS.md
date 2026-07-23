@@ -5,7 +5,8 @@
 > Convención: **[IND]** trabajo individual · **[INT]** integración con el módulo de Fede ·
 > **[HW]** requiere hardware real.
 
-**Última actualización:** semana 1 completada.
+**Última actualización:** semana 2 completada (parte individual — falta arrancar junto
+a Fede la definición de ADR-01 a ADR-05).
 
 ---
 
@@ -34,10 +35,26 @@
 
 ## Semana 2 — Tests unitarios + arquitectura de contratos `[IND]→[INT]`
 
-- [ ] Ampliar la suite UT-01: 1000 payloads generados sin `ValidationError`
-- [ ] Cubrir casos límite: campos nulos, `packet_loss_pct` fuera de rango, `schema_version` incorrecto
-- [ ] Instalar y configurar entorno Python 3.11 (venv, grpcio, pydantic)
+- [x] Ampliar la suite UT-01: 1000 payloads generados sin `ValidationError`
+- [x] Cubrir casos límite: campos nulos, `packet_loss_pct` fuera de rango, `schema_version` incorrecto
+- [x] Instalar y configurar entorno Python 3.11 (venv, grpcio, pydantic) — ver nota
+      sobre 3.11 vs. 3.13 en `README.md` §Requisitos
 - [ ] Empezar, junto a Fede, la definición de arquitectura y contratos (ADR-01 a ADR-05)
+      — pendiente, requiere coordinar con Fede (punto de corte de este avance individual)
+
+**Hallazgos y correcciones durante esta etapa** (detectados al retomar el trabajo, no
+parte del roadmap original, pero bloqueaban lo demás):
+
+- `src/mock-starlink/` tenía guion medio; todo el resto del repo ya esperaba guion bajo
+  (`mock_starlink`), por lo que la suite de tests ni se podía importar. Corregido
+  (rename).
+- `StarlinkMetrics` exigía como obligatorios varios campos que `docs/06_DER.md` ya
+  marca `NULL='S'` (telemetría degradada: ping sin respuesta, API interna de la antena
+  no accesible). Corregido — ver sección "Pendiente" más abajo por el drift de SRS que
+  quedó sin resolver en el proceso.
+- Se agregó la skill de proyecto `adr-check` (`.claude/skills/adr-check/`) + hook de
+  enforcement (`.claude/settings.json`) para detectar este tipo de drift automáticamente
+  a futuro, antes de que se acumule.
 
 ## Semana 3 — Docker + broker MQTT `[INT — primera integración con Fede]`
 
