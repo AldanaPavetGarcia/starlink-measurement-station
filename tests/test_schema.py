@@ -161,15 +161,29 @@ def test_infinity_es_rechazado_en_campos_con_validador_explicito(campo):
         StarlinkPayloadIn.model_validate(payload_valido(metrics={campo: math.inf}))
 
 
-@pytest.mark.parametrize("campo_faltante", [
+@pytest.mark.parametrize("campo_nullable", [
     "latency_ms", "jitter_ms", "packet_loss_pct",
     "throughput_down_bps", "throughput_up_bps", "snr_db", "is_obstructed",
 ])
-def test_campos_obligatorios_de_metrics_no_pueden_faltar(campo_faltante):
+def test_campos_nullable_del_der_aceptan_ausencia(campo_nullable):
+    """docs/06_DER.md marca estos campos NULL='S' (la medición puede fallar,
+    ej. ping sin respuesta o API interna de la antena no accesible): el
+    paquete se acepta igual, con el campo ausente."""
     data = payload_valido()
-    del data["metrics"][campo_faltante]
-    with pytest.raises(ValidationError):
-        StarlinkPayloadIn.model_validate(data)
+    del data["metrics"][campo_nullable]
+    payload = StarlinkPayloadIn.model_validate(data)
+    assert getattr(payload.metrics, campo_nullable) is None
+
+
+@pytest.mark.parametrize("campo_nullable", [
+    "latency_ms", "jitter_ms", "packet_loss_pct",
+    "throughput_down_bps", "throughput_up_bps", "snr_db", "is_obstructed",
+])
+def test_campos_nullable_del_der_aceptan_null_explicito(campo_nullable):
+    payload = StarlinkPayloadIn.model_validate(
+        payload_valido(metrics={campo_nullable: None})
+    )
+    assert getattr(payload.metrics, campo_nullable) is None
 
 
 # ---------------------------------------------------------------------------

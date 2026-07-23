@@ -9,6 +9,21 @@
 
 ---
 
+## Pendiente — revisar con director/co-director
+
+- **Drift entre `docs/03_SRS.md` §5.1 y `docs/06_DER.md` (network_metrics) / código**:
+  el SRS describe el paquete de telemetría Starlink con otro vocabulario y unidades
+  (`throughput_down_mbps`/`throughput_up_mbps` en Mbps, `obstruction_pct` y
+  `signal_quality` en vez de `is_obstructed`/`snr_db`), que no coincide con el DER ni
+  con `src/mock_starlink/schema.py` (que sigue al DER: `throughput_down/up_bps` en bps,
+  `is_obstructed` booleano, `snr_db` en dB). Es un drift preexistente, no introducido
+  por ningún cambio reciente de código — detectado por la skill `adr-check`. No se
+  resuelve unilateralmente: queda anotado acá para que el director/co-director defina
+  cuál de los dos documentos se actualiza (ver `CLAUDE.md` §12, "Decisiones
+  pendientes").
+
+---
+
 ## Semana 1 — Carpeta mock_starlink + esquema + tests `[IND]` ✅ COMPLETA
 
 - [x] Crear la carpeta `src/mock_starlink/`

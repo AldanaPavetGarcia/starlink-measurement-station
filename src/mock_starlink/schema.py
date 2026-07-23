@@ -6,8 +6,14 @@ Corresponde a la definición final documentada en el informe de relevamiento:
 - metrics como objeto anidado con las 8 métricas de red.
 - packet_loss_pct y jitter_ms se calculan en el extractor (no son campos
   nativos del gRPC), pero acá solo se valida el paquete ya construido.
-- satellite_count es opcional: no está garantizado en todo el hardware
-  ni referenciado por ningún requerimiento del SRS/DER.
+- Todos los campos de métricas salvo node_id/timestamp/schema_version son
+  opcionales (Optional, default None), reflejando docs/06_DER.md
+  (network_metrics, columna NULL='S'): la medición puede fallar (ping sin
+  respuesta, API interna de la antena no accesible) sin que el paquete
+  completo se descarte — se propaga con esos campos en null en vez de
+  romper la ingesta.
+- satellite_count además no está garantizado en todo el hardware ni
+  referenciado por ningún requerimiento del SRS.
 - No existe campo `source` (mock/real): decisión de alcance, el mock es
   solo una herramienta de desarrollo que no convive con datos reales.
 """
@@ -23,41 +29,48 @@ SCHEMA_VERSION = "1.0"
 class StarlinkMetrics(BaseModel):
     """Métricas de red propiamente dichas, ya calculadas por el extractor."""
 
-    latency_ms: float = Field(
-        ..., ge=0, le=5000,
-        description="Latencia de ping al POP (pop_ping_latency_ms), directo del gRPC."
+    latency_ms: Optional[float] = Field(
+        default=None, ge=0, le=5000,
+        description="Latencia de ping al POP (pop_ping_latency_ms), directo del gRPC. "
+                    "Null si la medición falló (conectividad interrumpida, DER NULL='S')."
     )
-    jitter_ms: float = Field(
-        ..., ge=0, le=2000,
+    jitter_ms: Optional[float] = Field(
+        default=None, ge=0, le=2000,
         description="Calculado en el extractor a partir de la variación entre "
-                    "muestras consecutivas de get_history. No es un campo nativo del gRPC."
+                    "muestras consecutivas de get_history. No es un campo nativo del gRPC. "
+                    "Null si no se pudo calcular (DER NULL='S')."
     )
-    packet_loss_pct: float = Field(
-        ..., ge=0, le=100,
-        description="Derivado como total_ping_drop / samples sobre get_history."
+    packet_loss_pct: Optional[float] = Field(
+        default=None, ge=0, le=100,
+        description="Derivado como total_ping_drop / samples sobre get_history. "
+                    "Null si la medición falló (DER NULL='S')."
     )
-    throughput_down_bps: float = Field(
-        ..., ge=0,
-        description="downlink_throughput_bps, sin convertir (bps, no Mbps)."
+    throughput_down_bps: Optional[float] = Field(
+        default=None, ge=0,
+        description="downlink_throughput_bps, sin convertir (bps, no Mbps). "
+                    "Null si la medición falló (DER NULL='S')."
     )
-    throughput_up_bps: float = Field(
-        ..., ge=0,
-        description="uplink_throughput_bps, sin convertir (bps, no Mbps)."
+    throughput_up_bps: Optional[float] = Field(
+        default=None, ge=0,
+        description="uplink_throughput_bps, sin convertir (bps, no Mbps). "
+                    "Null si la medición falló (DER NULL='S')."
     )
-    snr_db: float = Field(
-        ..., ge=-20, le=30,
+    snr_db: Optional[float] = Field(
+        default=None, ge=-20, le=30,
         description="snr del get_status. Rango amplio para tolerar condiciones "
-                    "de señal muy pobre sin rechazar el paquete."
+                    "de señal muy pobre sin rechazar el paquete. Null si la API "
+                    "interna de la antena no está accesible (DER NULL='S')."
     )
-    is_obstructed: bool = Field(
-        ...,
+    is_obstructed: Optional[bool] = Field(
+        default=None,
         description="Basado en currently_obstructed. obstruction_detail se "
-                    "descartó por estar deprecado en firmwares recientes."
+                    "descartó por estar deprecado en firmwares recientes. Null si "
+                    "la API interna de la antena no está accesible (DER NULL='S')."
     )
     satellite_count: Optional[int] = Field(
         default=None, ge=0,
         description="Opcional: no confiable en todo el hardware ni referenciado "
-                    "en el SRS/DER. No bloquea el paquete si falta."
+                    "en el SRS. No bloquea el paquete si falta (DER NULL='S')."
     )
 
     @field_validator("latency_ms", "jitter_ms", "throughput_down_bps", "throughput_up_bps")
