@@ -6,5 +6,12 @@ Ver docs/ADR-01 para la definición del esquema de datos.
 """
 
 from .schema import StarlinkMetrics, StarlinkPayloadIn, SCHEMA_VERSION
+from .mock import StarlinkMockAgent, CHAOS_PROFILES
 
-__all__ = ["StarlinkMetrics", "StarlinkPayloadIn", "SCHEMA_VERSION"]
+__all__ = [
+    "StarlinkMetrics",
+    "StarlinkPayloadIn",
+    "SCHEMA_VERSION",
+    "StarlinkMockAgent",
+    "CHAOS_PROFILES",
+]

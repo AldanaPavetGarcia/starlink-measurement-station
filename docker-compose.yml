@@ -15,6 +15,28 @@ services:
       timeout: 5s
       retries: 3
 
+  # ADR-07: microservicio Docker independiente. Nombre de imagen pensado para
+  # GHCR (ghcr.io/aldanapavetgarcia/mock-starlink:tag) el día que se publique —
+  # hoy se construye local con `build:`. Perfiles "mocks"/"stress" en línea con
+  # los comandos que ya usa docs/08_Plan_QA.md.
+  mock_starlink:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mock-starlink:dev
+    container_name: mock-starlink
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+    environment:
+      MQTT_HOST: broker
+      MQTT_PORT: 1883
+      STARLINK_NODE_ID: ${STARLINK_NODE_ID:-lit-cordoba-01}
+      CHAOS_PROFILE: ${CHAOS_PROFILE:-CALM}
+      TIME_WARP_FACTOR: ${TIME_WARP_FACTOR:-1}
+    profiles: [mocks, stress]
+
 volumes:
   mosquitto_data:
   mosquitto_log:
