@@ -5,13 +5,14 @@
 > Convención: **[IND]** trabajo individual · **[INT]** integración con el módulo de Fede ·
 > **[HW]** requiere hardware real.
 
-**Última actualización:** semana 2 completada. ADR-01 a ADR-05 revisados y sus puntos
-abiertos cerrados del lado de Aldana (ver "Corregido esta sesión") — **falta que Fede
-confirme los puntos de ADR-02/ADR-03 (BME280, backoff ESP32, LWT) que se completaron
-con valores por default**. Arrancando semana 3 (broker MQTT): `docker-compose.yml` y
-`services/broker/mosquitto.conf` ya creados y verificados localmente (`docker compose
-up` levanta el broker, pub/sub probado a mano) — falta correr la integración real con
-el mock y con el productor de Fede.
+**Última actualización:** semanas 1 a 5 completadas del lado individual de Aldana.
+ADR-01 a ADR-05 revisados y sus puntos abiertos cerrados (ver "Corregido esta
+sesión") — **falta que Fede confirme los puntos de ADR-02/ADR-03 (BME280, backoff
+ESP32, LWT) que se completaron con valores por default**. Mock stateful (ADR-06),
+publisher MQTT con LWT y empaquetado Docker (ADR-07) implementados y verificados
+contra un broker real (`docker compose --profile mocks up --build`, pub/sub y
+`docker kill` para el LWT, todo a mano). `TIME_WARP_FACTOR` (ADR-08) funcionando.
+Próximo corte real: **semana 6**, consumer MQTT conjunto con Fede.
 
 ---
 
@@ -111,6 +112,31 @@ el mock y con el productor de Fede.
   coincida con el ADR (gana por prioridad de `CLAUDE.md` §2: el ADR pesa más que el
   Plan de QA).
 
+- **Resto de semana 3 + semana 4 + semana 5 implementadas** (`src/mock_starlink/mock.py`,
+  `__main__.py`, `Dockerfile`, servicio `mock_starlink` en `docker-compose.yml`,
+  `tests/test_mock.py` + `tests/test_main.py`): mock stateful con random walk e
+  inyección de caos (ADR-06), publisher MQTT con LWT (ADR-03/09), `TIME_WARP_FACTOR`
+  (ADR-08), empaquetado Docker (ADR-07). 67/67 tests, `mock.py` al 100% de cobertura;
+  `__main__.py` parcialmente cubierto por unit tests (la lógica de conexión MQTT se
+  probó manualmente contra un broker real, no con mocks de `paho-mqtt` — no se justificó
+  la complejidad extra para esta etapa). Verificado end-to-end: `docker compose
+  --profile mocks up --build`, payloads válidos en `starlink/metrics/<node_id>`, LWT
+  online/offline en `system/status/<node_id>` (`docker kill` para forzar el offline).
+
+- **Vocabulario de ADR-06 traducido al DER en la implementación**: `mock.py` genera
+  `throughput_down/up_bps`, `is_obstructed` (umbral sobre un `obstruction_pct` interno
+  no publicado, >10%) y `snr_db`, no el vocabulario Mbps/`obstruction_pct`/
+  `signal_quality` de la tabla estadística de ADR-06/SRS — mismo criterio que ya se
+  usa en el resto del proyecto (seguir al DER/`schema.py`). Ver nota nueva en
+  "Pendiente — revisar con director/co-director".
+
+- **Parámetros de `CHAOS_PROFILE` por perfil, sin especificar en ningún documento**:
+  ADR-06 describe el mecanismo general de "evento de anomalía" pero no lo separa por
+  perfil. Se calibró una tabla propia (documentada en el docstring de `mock.py`) para
+  que `STORM` cumpla el umbral literal de UT-04-02 (`docs/08_Plan_QA.md`: ≥15% de
+  spikes >150ms en 1000 muestras) — verificado con datos reales de la suite de tests
+  (~20-22% en las corridas locales, con margen sobre el mínimo exigido).
+
 ---
 
 ## Coordinación pendiente con Fede
@@ -129,6 +155,13 @@ el mock y con el productor de Fede.
   (ver "Puntos abiertos... cerrados con Aldana" arriba): backoff exponencial del ESP32 y
   formato del mensaje LWT. Son parte de su firmware — necesitan su OK antes de darlos
   por definitivos.
+- **Publicar `mock-starlink` a GHCR antes de la integración real de semana 6** — hoy
+  `docker-compose.yml` lo construye local (`build:`), consistente con el modelo
+  polyrepo pero todavía no publicado. No se armó CI/publicación automática en este
+  tramo (es semana 11-12 del roadmap) — publicar a mano cuando haga falta.
+- **Decidir si el `docker-compose.yml` de integración (broker + ambos mocks) se queda
+  en este repo o se muda a un repo neutral** una vez que Fede tenga el suyo — por ahora
+  vive acá porque fue lo que hubo que levantar primero.
 
 ---
 
@@ -170,24 +203,43 @@ parte del roadmap original, pero bloqueaban lo demás):
       verificado con `docker compose up` + pub/sub manual; falta correrlo junto con Fede
 - [x] Definir el topic de publicación para métricas Starlink — `starlink/metrics/<node_id>`
       (ADR-04 corregido para coincidir con SRS/DER/Plan QA, ver "Corregido esta sesión")
-- [ ] Modificar el script/mock para publicar el JSON al broker en vez de imprimir por consola
-- [ ] Verificar mensajes con `mosquitto_sub` / MQTT Explorer
-- [ ] Confirmar, junto con Fede, que ambos mocks publican y los datos llegan al broker
+- [x] Modificar el script/mock para publicar el JSON al broker en vez de imprimir por consola —
+      `src/mock_starlink/__main__.py`, cliente `paho-mqtt` con LWT y reconexión automática
+- [x] Verificar mensajes con `mosquitto_sub` — hecho a mano contra un broker real
+      (`docker compose --profile mocks up --build`), payloads y LWT (online/offline vía
+      `docker kill`) confirmados
+- [ ] Confirmar, junto con Fede, que ambos mocks publican y los datos llegan al broker —
+      pendiente de que él tenga su parte lista
 
 > 🔗 Milestone: primera vez que los dos módulos comparten el broker.
 
-## Semana 4 — Mock de telemetría Starlink (stateful) `[IND]`
+## Semana 4 — Mock de telemetría Starlink (stateful) `[IND]` ✅ COMPLETA
 
-- [ ] Implementar el Mock Stateful con Random Walk (ADR-06) en vez de números aleatorios puros
-- [ ] Agregar inyección de caos: obstrucciones, handovers, microcortes de conectividad
-- [ ] Empaquetar el mock como microservicio Docker independiente (ADR-07)
-- [ ] Publicar continuamente al broker respetando el esquema de semana 1
+- [x] Implementar el Mock Stateful con Random Walk (ADR-06) en vez de números aleatorios puros —
+      `src/mock_starlink/mock.py`, `StarlinkMockAgent.generate_payload()`
+- [x] Agregar inyección de caos: obstrucciones, handovers, microcortes de conectividad —
+      `CHAOS_PROFILE` (`CALM`/`STORM`/`HANDOVER_HEAVY`), ver tabla de parámetros por perfil
+      en el docstring de `mock.py` (no especificada por ADR-06 a nivel de perfil, calibrada
+      para satisfacer UT-04-02 de `docs/08_Plan_QA.md`: STORM ≥15% de spikes >150ms)
+- [x] Empaquetar el mock como microservicio Docker independiente (ADR-07) — `Dockerfile`
+      (`python:3.11-slim`, multi-arch) + servicio `mock_starlink` en `docker-compose.yml`,
+      imagen `mock-starlink:dev` (nombrada para publicar a GHCR más adelante sin rename)
+- [x] Publicar continuamente al broker respetando el esquema de semana 1 — validado con
+      `StarlinkPayloadIn` en tests (0 errores en 1000+ payloads por perfil)
 
-## Semana 5 — Mock Starlink (cont.) + preparación del consumer `[IND]`
+## Semana 5 — Mock Starlink (cont.) + preparación del consumer `[IND]` ✅ COMPLETA (con una salvedad)
 
-- [ ] Ajustar frecuencia de muestreo para que sea coherente con lo que espera TimescaleDB
-- [ ] Agregar el parámetro `TIME_WARP_FACTOR` al mock (ADR-08) para backfill acelerado
-- [ ] Dejar el mock corriendo de forma estable como base para el consumer conjunto
+- [x] Agregar el parámetro `TIME_WARP_FACTOR` al mock (ADR-08) para backfill acelerado —
+      `time_warp_factor` en el constructor de `StarlinkMockAgent`; con `factor > 1` arranca
+      el reloj simulado 30 días atrás (ejemplo de ADR-08) y avanza 60s simulados por tick,
+      clampeado para nunca superar el "no future timestamp" del validador de `schema.py`
+- [x] Dejar el mock corriendo de forma estable como base para el consumer conjunto — corre
+      indefinidamente, reconexión automática al broker, no se cae ante errores de publish
+- [ ] ⚠️ Ajustar frecuencia de muestreo para que sea coherente con lo que espera TimescaleDB —
+      **parcial**: el mecanismo (`interval_s = 60/time_warp_factor`) está implementado y
+      probado en aislamiento, pero no se puede validar contra un consumer/TimescaleDB reales
+      todavía (no existen hasta semana 6-7). No se sobre-afirma como "tuneado" — retomar en
+      semana 7 (índices) o semana 21 (stress test) con la DB real ya levantada.
 
 ## Semana 6 — Consumer MQTT conjunto `[INT — segunda integración con Fede]`
 
