@@ -547,7 +547,7 @@ Además, el proceso de población de la DB no debe ser un artefacto de desarroll
 
 **✅ Decisión: Alternativa B — Ingesta Orgánica End-to-End con variable TIME_WARP_FACTOR**
 
-Los mocks operan con una variable de entorno SIMULATION_SPEED_FACTOR (ej. 60). Un factor de 60 significa que los mocks publican 1 msg/s en lugar de 1 msg/min, generando 1 hora de datos en 1 minuto real. El consumer procesa estos mensajes usando exactamente el mismo código de producción. En 30 minutos se pueden cargar 30 días de historia[^c9].
+Los mocks operan con una variable de entorno TIME_WARP_FACTOR (ej. 60). Un factor de 60 significa que los mocks publican 1 msg/s en lugar de 1 msg/min, generando 1 hora de datos en 1 minuto real. El consumer procesa estos mensajes usando exactamente el mismo código de producción. En 30 minutos se pueden cargar 30 días de historia[^c9].
 
 ### Pros y Contras
 

@@ -55,7 +55,7 @@ Todas las pruebas unitarias e integración se ejecutan en la PC de desarrollo, s
 | DB_ENV_HOST | localhost:5434 | TimescaleDB ambiental de test en tmpfs |
 | ENABLE_INGEST_ENDPOINT | true | Habilita POST /ingest/* para poblar datos en los tests de API |
 | TIME_WARP_FACTOR | 60 / 3600 | 60 = 1 día de datos en 24 min · 3600 = 1 día en 24 seg (stress test) |
-| CHAOS_PROFILE | NORMAL / STORM / OUTAGE | Perfil de caos del mock: inyecta spikes, cortes o degradación severa |
+| CHAOS_PROFILE | CALM / STORM / HANDOVER_HEAVY | Perfil de caos del mock: inyecta spikes, cortes o degradación severa |
 | LOG_LEVEL | DEBUG | Activa logs detallados para diagnóstico de fallos en CI |
 
 | **Nivel 1 — Pruebas Unitarias** |

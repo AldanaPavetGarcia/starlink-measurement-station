@@ -48,6 +48,28 @@ el mock y con el productor de Fede.
   mock. Falta dejarlo explícito por escrito en el ADR para que no quede ambiguo — no
   resuelto todavía.
 
+- **ADR-06 (tabla estadística del mock) tiene el mismo drift de vocabulario que ya
+  estaba anotado arriba entre SRS/DER**: usa `throughput_down/up_mbps`,
+  `obstruction_pct` y `signal_quality` (vocabulario del SRS) en vez de
+  `throughput_down/up_bps`, `is_obstructed` y `snr_db` (vocabulario del DER y de
+  `schema.py`). No es un conflicto nuevo, es el mismo — se extiende la nota para que
+  el director sepa que también afecta a ADR-06. La implementación del mock stateful
+  sigue al DER/`schema.py` (ya es el estándar de facto del proyecto).
+
+- **`docs/03_SRS.md` §10.3 contradice a ADR-08 sobre el mecanismo de backfill**: el SRS
+  describe un "script de backfill" que inserta directamente en las hypertables vía SQL
+  — exactamente la Alternativa A que ADR-08 rechaza explícitamente a favor de la
+  ingesta orgánica E2E vía `TIME_WARP_FACTOR`. La implementación de semana 5 sigue a
+  ADR-08 (es lo que pide el roadmap de `CLAUDE.md` §1.1); queda anotado para que el
+  director defina si el SRS se actualiza.
+
+- **El fixture de ejemplo embebido en `docs/08_Plan_QA.md` (bloque `conftest.py`) usa
+  un tercer vocabulario** (`station_id`, `source_module`, `pop_ping_latency_ms`,
+  `pop_ping_drop_rate`, `downlink/uplink_throughput_bps`) que no coincide ni con el DER
+  ni con `schema.py` ni con el resto del propio Plan de QA (las tablas UT-01/UT-04 sí
+  usan `node_id`/`metrics.latency_ms`/etc.). Parece un borrador viejo — no se usa como
+  referencia para la implementación.
+
 ---
 
 ## Corregido esta sesión
@@ -75,6 +97,19 @@ el mock y con el productor de Fede.
 - **Imagen Docker de Mosquitto corregida**: `eclipse-mosquitto:2.0-alpine` (citada en
   ADR-09) no existe en Docker Hub — se corrigió a `eclipse-mosquitto:2.0.18` (misma
   familia alpine-based, ~22 MB), verificado con `docker pull` real.
+
+- **Drift de nomenclatura `TIME_WARP_FACTOR` vs. `SIMULATION_SPEED_FACTOR`**: el
+  párrafo de Decisión de ADR-08 y una tabla de `CLAUDE.md` usaban
+  `SIMULATION_SPEED_FACTOR`, mientras que el título/índice de ADR-08 y otros 3
+  documentos (`CLAUDE.md` ×2, `docs/08_Plan_QA.md`, este archivo) ya usaban
+  `TIME_WARP_FACTOR`. Se corrigieron las 2 menciones sueltas para que gane
+  `TIME_WARP_FACTOR` (3 documentos contra 1).
+
+- **Drift de valores de `CHAOS_PROFILE`**: ADR-06 y `CLAUDE.md` usan
+  `CALM/STORM/HANDOVER_HEAVY`; la tabla de variables de entorno de
+  `docs/08_Plan_QA.md` usaba `NORMAL/STORM/OUTAGE`. Se corrigió esa tabla para que
+  coincida con el ADR (gana por prioridad de `CLAUDE.md` §2: el ADR pesa más que el
+  Plan de QA).
 
 ---
 
