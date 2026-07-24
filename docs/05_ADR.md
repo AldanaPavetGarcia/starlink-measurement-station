@@ -117,15 +117,19 @@ Usar el wrapper Protobuf de la antena como entrada, convertir a diccionario Pyth
 
 ### Decisión
 
-**✅ Decisión: Alternativa C — Sistema Híbrido (Protobuf → ****Python Dict**[^c0]** → Pydantic → JSON)**
+**✅ Decisión: Alternativa C — Sistema Híbrido (Protobuf → dict Python en memoria → Pydantic → JSON)**
+
+(El paso intermedio es una estructura de datos en memoria, no un formato de serialización — el dict nunca se serializa ni se transmite tal cual, solo existe dentro del proceso Python hasta llegar a Pydantic.)
 
 Se extrae el dato en Protobuf nativo de la antena usando starlink-grpc-tools. Inmediatamente se convierte a dict Python. Pydantic valida el esquema (tipos, rangos, campos requeridos) antes de que el dato toque cualquier sistema downstream. La salida es JSON para MQTT, PostgreSQL y todos los componentes internos.
 
-### Justificación[^c1] — Rechazo de Alternativas
+### Justificación — Rechazo de Alternativas
 
 **Rechazo de Alternativa A (JSON Puro):** el JSON no validado permite que errores de tipo (ej. un string '15ms' donde se espera float 15.0) lleguen silenciosamente a la base de datos, corrompiendo las series temporales. La pérdida de datos silenciosa es inaceptable en un proyecto de medición científica. Pydantic resuelve esto sin los costos operativos de Protobuf.
 
 **Rechazo de Alternativa B (Protobuf End-to-End):** el costo de desarrollo se multiplica: cada mock debe compilar un archivo .proto, cada cambio de esquema requiere recompilar. En una tesis con ciclos de iteración cortos y dos desarrolladores, esto es overhead inaceptable. Además, TimescaleDB no tiene soporte nativo para consultas sobre campos Protobuf binarios.
+
+**Rol de Pydantic como Anti-Corruption Layer:** en términos de Domain-Driven Design (Evans, 2003), la validación Pydantic cumple el rol de un Anti-Corruption Layer (ACL) entre el dominio externo (el firmware propietario de la antena, con su propio vocabulario y formato Protobuf, fuera de nuestro control y sujeto a cambios de firmware) y el dominio interno del sistema (el modelo `StarlinkPayloadIn`, que es la Single Source of Truth de la morfología de paquetes). Ningún dato cruza esa frontera sin pasar por la validación: si el firmware cambia un tipo o un rango de valores, la excepción de Pydantic lo detiene ahí, antes de que corrompa el modelo interno o la base de datos.
 
 ### Pros y Contras de la Decisión Tomada
 
@@ -186,11 +190,11 @@ Esta decisión impacta directamente en la complejidad del driver de software, la
 | Costo de reemplazo | Bajo por unidad, pero requiere resolver el ADC externo | Módulo breakout BME280 ≈ USD 5–10. Reemplazo plug-and-play |
 | Precisión en condiciones reales | Variable — depende de calidad del ADC, blindaje de cables, temperatura ambiente | Garantizada por datasheet en todo el rango operativo |
 
-### Decisión[^c2]
+### Decisión
 
 **✅ Decisión: Alternativa B — Sensores Digitales I2C, específicamente el BME280 de Bosch**
 
-Se selecciona el sensor digital BME280 conectado vía bus I²C al Raspberry Pi 5. Un único chip provee las tres variables requeridas (T, HR, P) con calibración de fábrica garantizada y sin necesidad de hardware ADC externo.
+Se selecciona el sensor digital BME280 conectado vía bus I²C al Raspberry Pi 5. Un único chip provee las tres variables requeridas (T, HR, P) con calibración de fábrica garantizada y sin necesidad de hardware ADC externo. Pesa también en la decisión que el BME280 ya viene con interfaces integradas y estandarizadas en ambos niveles: hardware (bus I²C nativo, sin ADC ni circuitería de acondicionamiento de señal externa) y software (librería `adafruit-circuitpython-bme280` ya publicada y mantenida), evitando desarrollar un driver propio desde cero como requeriría un sensor analógico.
 
 ### Pros y Contras
 
@@ -256,15 +260,15 @@ El ESP32 lee el BME280 vía I²C local, construye el paquete JSON (librería Ard
 | **Desacoplamiento absoluto** | ✅ PRO | El ESP32 solo necesita Wi-Fi. El sensor puede estar a metros de la RPi5 sin cableado entre nodos. |
 | **Determinismo de muestreo** | ✅ PRO | El loop() de ESP32 ejecuta cada 60 000 ms con jitter < 1 ms. Linux (RPi5) puede tener jitter de decenas de ms bajo carga. |
 | **Integración con arquitectura MQTT** | ✅ PRO | El ESP32 es un productor MQTT nativo. Encaja perfectamente con el broker central (ADR-09) sin scripts intermediarios. |
-| **Dependencia del router Wi-Fi** | ⚠️ CONTRA | Si el router falla, el ESP32 no puede publicar. Mitigación: el firmware implementa reconnect() automático con backoff exponencial[^c3] y el broker maneja el Last Will and Testament[^c4]. |
+| **Dependencia del router Wi-Fi** | ⚠️ CONTRA | Si el router falla, el ESP32 no puede publicar. Mitigación: el firmware implementa reconnect() automático con backoff exponencial (delay inicial 1 s, factor x2 por intento fallido, tope de 60 s, reintentos indefinidos — mismo esquema que usan los SDKs de AWS IoT/Azure) y el broker maneja el Last Will and Testament. |
 | **Gestión de credenciales Wi-Fi** | ⚠️ CONTRA | Las credenciales de red deben estar en el firmware del ESP32. Mitigación: uso de un archivo de configuración compilado no versionado (credentials.h en .gitignore). |
 | **MQTT sin TLS en red local** | ⚠️ CONTRA | MQTT sobre puerto 1883 sin cifrado en la LAN del laboratorio. Aceptable en red local aislada; se evaluará TLS para la fase cloud. |
 
 ### Consecuencias e Implicaciones
 
-- El firmware del ESP32 incluye el mecanismo Last Will and Testament (LWT) de MQTT: si el ESP32 se cuelga, el broker emite automáticamente un mensaje de alerta en el tópico de estado del sistema.
+- El firmware del ESP32 incluye el mecanismo Last Will and Testament (LWT) de MQTT: si el ESP32 se cuelga, el broker emite automáticamente un mensaje de alerta en el tópico `system/status/<node_id>` (mismo esquema domain-first que el resto de los tópicos, ver ADR-04). Payload JSON: `{"node_id": "...", "source": "esp32_bme280|starlink_grpc|starlink_mock|...", "status": "offline"}`, `retain=true` (un nuevo suscriptor ve el último estado sin esperar el próximo heartbeat), QoS 1. Todo productor (real o mock) configura su propio LWT con este mismo formato al conectarse al broker.
 
-- El tópico MQTT del ESP32 sigue la jerarquía definida: nodo/lit-01/meteo/bme280_hardware.
+- El tópico MQTT del ESP32 sigue la jerarquía definida: meteo/sensor/<node_id>.
 
 - El mock del BME280 (ADR-07) publica en el mismo tópico con idéntica morfología. El consumer no distingue entre dato real y sintético; solo el campo source del JSON lo indica.
 
@@ -318,12 +322,25 @@ La taxonomía de tópicos establece el enrutamiento semántico de todos los mens
 
 | **Tópico MQTT** | **Productor** | **Consumidor** | **Base de Datos Destino** |
 | --- | --- | --- | --- |
-| nodo/lit-01/meteo/bme280_hardware | ESP32 + BME280 real | Consumer Router | meteo_db → hypertable env_metrics |
-| nodo/lit-01/meteo/bme280_mock | Mock BME280 (Docker) | Consumer Router | meteo_db → hypertable env_metrics |
-| nodo/lit-01/meteo/api_externa | Integrador API (Open-Meteo) | Consumer Router | meteo_db → hypertable env_metrics |
-| nodo/lit-01/net_health/starlink_grpc | Script gRPC Starlink (real o mock) | Consumer Router | starlink_health_db → hypertable network_metrics |
+| starlink/metrics/<node_id> | Script gRPC Starlink (real o mock) | Consumer Router | starlink_health_db → hypertable network_metrics |
+| meteo/sensor/<node_id> | ESP32 + BME280 (real o mock) | Consumer Router | meteo_db → hypertable env_metrics |
+| meteo/external/<node_id> | Integrador API (Open-Meteo) | Consumer Router | meteo_db → hypertable env_metrics |
 | nodo/lit-01/net_health/iperf_test | Script iPerf3 activo[^c5] | Consumer Router | starlink_health_db → hypertable network_metrics |
-| nodo/lit-01/system_status/# | Cualquier servicio (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
+| system/status/<node_id> | Cualquier servicio (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
+
+> Alineado con `docs/03_SRS.md` §5.1 (IF-01, IF-02, IF-03, RF-17), `docs/06_DER.md` y
+> `docs/08_Plan_QA.md` (UT-03, IT-01/IT-02) — esos cuatro documentos ya usaban esta
+> convención de forma consistente; esta tabla era la que estaba desactualizada. Nota:
+> `bme280_hardware`/`bme280_mock` se unifican en un solo tópico porque ADR-01 exige que
+> el hardware real y el mock sean intercambiables 1:1 sin cambios downstream (mismo
+> tópico, misma morfología de paquete). `system/status/<node_id>` sigue el mismo estilo
+> domain-first; no está cubierto por el SRS (es un tópico operativo, no de datos de
+> medición) pero no contradice RF-17, que solo obliga la jerarquía de los tres tópicos
+> de datos.
+>
+> La fila `net_health/iperf_test` queda pendiente de revisión — no está cubierta por el
+> SRS ni por el "Alcance técnico" de `CLAUDE.md` §1.1, y su propósito no está claro (ver
+> comentario [^c5] y `docs/PROGRESS.md`).
 
 ### Pros y Contras de la Arquitectura Políglota
 
@@ -335,7 +352,7 @@ La taxonomía de tópicos establece el enrutamiento semántico de todos los mens
 | **Complejidad operativa** | ⚠️ CONTRA | Más componentes = más superficie de falla. Mitigación: healthcheck de Docker y restart: unless-stopped en todos los servicios. |
 | **Latencia adicional (MQTT broker)** | ⚠️ CONTRA | El broker añade ~1–5 ms de latencia en la ruta del dato. Completamente despreciable para datos de telemetría a 1 msg/min. |
 
-## ADR-05 — Selección[^c6] de Lenguajes de Programación
+## ADR-05 — Selección de Lenguajes y Paradigma de Programación
 
 | **Atributo** | **Valor** |
 | --- | --- |
@@ -573,14 +590,14 @@ El message broker es la pieza central de la arquitectura orientada a eventos. Su
 | Protocolo estándar para IoT | ⚠️ AMQP es estándar enterprise, no IoT específico | ✅ MQTT es el estándar IoT (ISO/IEC 20922) | ❌ No es un broker de mensajería IoT |
 | Last Will and Testament (LWT) | ⚠️ Parcialmente (no nativo) | ✅ Función nativa del protocolo MQTT | ❌ No disponible |
 | Compatibilidad ESP32 (Arduino) | ❌ No hay librería [^c12]AMQP estable para Arduino | ✅ PubSubClient: librería MQTT nativa para Arduino/ESP32 | ❌ No existe cliente Redis nativo para Arduino |
-| Imagen Docker para ARM64 (RPi5) | ✅ Disponible pero pesada | ✅ eclipse-mosquitto:2.0-alpine (~5 MB) | ✅ redis:alpine (~30 MB) |
+| Imagen Docker para ARM64 (RPi5) | ✅ Disponible pero pesada | ✅ eclipse-mosquitto:2.0.18 (~22 MB) | ✅ redis:alpine (~30 MB) |
 | Curva de aprendizaje | Alta (exchanges, queues, bindings, vhosts) | Baja (topics, QoS, retained messages) | Baja (SUBSCRIBE/PUBLISH), pero diferente a MQTT |
 
 ### Decisión
 
 **✅ Decisión: Alternativa B — Eclipse Mosquitto con protocolo MQTT v5.0**
 
-Mosquitto se despliega como contenedor Docker usando la imagen eclipse-mosquitto:2.0-alpine. Todos los productores (scripts Python y ESP32) usan QoS 1 (at least once). Los consumers usan clean_session=False para recibir mensajes acumulados durante desconexiones. El LWT se configura en cada productor para notificación automática de fallos.
+Mosquitto se despliega como contenedor Docker usando la imagen eclipse-mosquitto:2.0.18. Todos los productores (scripts Python y ESP32) usan QoS 1 (at least once). Los consumers usan clean_session=False para recibir mensajes acumulados durante desconexiones. El LWT se configura en cada productor para notificación automática de fallos.
 
 ### Funciones Críticas de MQTT utilizadas
 
@@ -588,7 +605,7 @@ Mosquitto se despliega como contenedor Docker usando la imagen eclipse-mosquitto
 | --- | --- | --- |
 | QoS Level 1 (At least once) | Garantiza que ningún mensaje de telemetría se pierde si el consumer o el broker se reinicia transitoriamente. | qos=1 en todos los publish() y subscribe() |
 | Persistent Session (clean_session=False) | El broker retiene mensajes no entregados para el consumer cuando este se desconecta y los entrega al reconectar. | client.connect(...) con clean_session=False en el consumer |
-| Last Will and Testament (LWT) | Si un productor se cuelga sin desconectarse limpiamente, el broker publica automáticamente un mensaje de alerta en el tópico de estado del sistema. | client.will_set('nodo/lit-01/system_status/...', ...) |
+| Last Will and Testament (LWT) | Si un productor se cuelga sin desconectarse limpiamente, el broker publica automáticamente un mensaje de alerta en el tópico de estado del sistema. | client.will_set('system/status/<node_id>', ...) |
 | Retained Messages | El último valor de métricas clave queda retenido en el broker. Un nuevo suscriptor recibe inmediatamente el estado más reciente sin esperar el próximo ciclo. | retain=True en métricas de estado del sistema |
 
 ### Pros y Contras
@@ -913,18 +930,23 @@ Este apéndice consolida las alternativas que fueron evaluadas seriamente pero n
 
 ## Comments
 
+### Pendientes
+
 [^c9] ALDANA MICAELA PAVET GARCÍA: Cuanto espacio demanda eso, rever mensajes a probar
 [^c14] SANTIAGO MARTIN HENN: poner algo de que las apps que desarrollan van a ser "stateless"
 [^c13] SANTIAGO MARTIN HENN: parte del mismo
-[^c6] ALDANA MICAELA PAVET GARCÍA: Paradigma de programación
 [^c10] ALDANA MICAELA PAVET GARCÍA: Sacar o explicar bien
-[^c2] ALDANA MICAELA PAVET GARCÍA: Explicar que se elige porque viene integrado con interfaces
 [^c7] ALDANA MICAELA PAVET GARCÍA: Mock para validar funcionamiento antes de conectar
-[^c1] ALDANA MICAELA PAVET GARCÍA: Anticorrupción, acl
-[^c3] ALDANA MICAELA PAVET GARCÍA: Definir
 [^c8] ALDANA MICAELA PAVET GARCÍA: No es necesario por objetivo
-[^c0] ALDANA MICAELA PAVET GARCÍA: No es formato de serialización, es una estructura de datos
 [^c12] SANTIAGO MARTIN HENN: No?
-[^c5] ALDANA MICAELA PAVET GARCÍA: No queda claro, para qué?
+[^c5] ALDANA MICAELA PAVET GARCÍA: No queda claro, para qué? (ver `docs/PROGRESS.md`, fila `net_health/iperf_test` de ADR-04)
 [^c11] ALDANA MICAELA PAVET GARCÍA: 200 que?
-[^c4] ALDANA MICAELA PAVET GARCÍA: Definir
+
+### Resueltos
+
+[^c6] ALDANA MICAELA PAVET GARCÍA: Paradigma de programación — resuelto: título de ADR-05 renombrado a "Selección de Lenguajes y Paradigma de Programación".
+[^c2] ALDANA MICAELA PAVET GARCÍA: Explicar que se elige porque viene integrado con interfaces — resuelto: agregado a la Decisión de ADR-02.
+[^c1] ALDANA MICAELA PAVET GARCÍA: Anticorrupción, acl — resuelto: agregado párrafo de framing ACL (Anti-Corruption Layer) en la Justificación de ADR-01.
+[^c3] ALDANA MICAELA PAVET GARCÍA: Definir — resuelto: parámetros de backoff exponencial definidos en ADR-03 (delay inicial 1s, factor x2, tope 60s, reintentos indefinidos).
+[^c0] ALDANA MICAELA PAVET GARCÍA: No es formato de serialización, es una estructura de datos — resuelto: reformulada la Decisión de ADR-01 para aclarar que el dict Python es una estructura en memoria, no un formato de serialización.
+[^c4] ALDANA MICAELA PAVET GARCÍA: Definir — resuelto: mensaje LWT definido en ADR-03 (`system/status/<node_id>`, payload JSON, retain=true, QoS 1); tópico alineado en la tabla de ADR-04.

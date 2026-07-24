@@ -5,8 +5,13 @@
 > Convención: **[IND]** trabajo individual · **[INT]** integración con el módulo de Fede ·
 > **[HW]** requiere hardware real.
 
-**Última actualización:** semana 2 completada (parte individual — falta arrancar junto
-a Fede la definición de ADR-01 a ADR-05).
+**Última actualización:** semana 2 completada. ADR-01 a ADR-05 revisados y sus puntos
+abiertos cerrados del lado de Aldana (ver "Corregido esta sesión") — **falta que Fede
+confirme los puntos de ADR-02/ADR-03 (BME280, backoff ESP32, LWT) que se completaron
+con valores por default**. Arrancando semana 3 (broker MQTT): `docker-compose.yml` y
+`services/broker/mosquitto.conf` ya creados y verificados localmente (`docker compose
+up` levanta el broker, pub/sub probado a mano) — falta correr la integración real con
+el mock y con el productor de Fede.
 
 ---
 
@@ -22,6 +27,73 @@ a Fede la definición de ADR-01 a ADR-05).
   resuelve unilateralmente: queda anotado acá para que el director/co-director defina
   cuál de los dos documentos se actualiza (ver `CLAUDE.md` §12, "Decisiones
   pendientes").
+
+- **Alcance de `net_health/iperf_test` en ADR-04**: la tabla de tópicos de ADR-04 tiene
+  una fila para un test activo con iPerf3 que no está cubierta por el SRS y cuyo alcance
+  no quedó claro (comentario propio [^c5] en el ADR: "no queda claro, para qué?"). No
+  forma parte del "Alcance técnico del módulo Starlink" descrito en `CLAUDE.md` §1.1
+  (que solo cubre telemetría pasiva vía gRPC). Definir con el director si iPerf3 activo
+  entra en el alcance del PI o si esa fila se elimina del ADR.
+
+- **Decisión pendiente del director sobre "stateless" (ADR-12, [^c14]) vs. mock stateful
+  (ADR-06)**: el director dejó un comentario pidiendo aclarar que "las apps van a ser
+  stateless", lo cual en principio choca con que ADR-06 define el mock de Starlink como
+  explícitamente stateful (random walk con memoria del último valor). No es
+  necesariamente una contradicción real: "stateful" en ADR-06 describe la lógica de
+  generación de datos dentro del proceso en memoria (para que los gráficos tengan
+  inercia temporal realista), mientras que "stateless" en el sentido de infraestructura
+  (12-factor apps) se refiere a que el contenedor no depende de un volumen local
+  persistente para funcionar — puede reiniciarse sin coordinación especial porque el
+  estado que importa (las métricas ya generadas) vive en la base de datos, no en el
+  mock. Falta dejarlo explícito por escrito en el ADR para que no quede ambiguo — no
+  resuelto todavía.
+
+---
+
+## Corregido esta sesión
+
+- **Drift de nomenclatura de tópicos MQTT (ADR-04 vs. resto)**: la tabla de tópicos de
+  ADR-04 usaba `nodo/lit-01/net_health/starlink_grpc` / `nodo/lit-01/meteo/bme280_*`,
+  mientras que `docs/03_SRS.md` (IF-01/02/03, RF-17), `docs/06_DER.md` y
+  `docs/08_Plan_QA.md` ya usaban consistentemente `starlink/metrics/<node_id>` /
+  `meteo/sensor/<node_id>` / `meteo/external/<node_id>`. Se corrigió ADR-04 para
+  alinearlo con los otros tres documentos (eran 4 contra 1). También se unificaron los
+  tópicos separados de BME280 real/mock en uno solo, consistente con la exigencia de
+  ADR-01 de que mock y hardware real sean intercambiables 1:1. El tópico de
+  `system_status/#` se renombró a `system/status/<node_id>` (mismo estilo domain-first)
+  y se definió el mensaje LWT concreto (payload JSON, retain=true, QoS 1) en ADR-03.
+
+- **Puntos abiertos de ADR-01 a ADR-05 cerrados con Aldana** ([^c0], [^c1], [^c2],
+  [^c3], [^c4], [^c6] — ver sección "Resueltos" en `docs/05_ADR.md` → Comments):
+  framing de Pydantic como Anti-Corruption Layer (ADR-01), aclaración de que el dict
+  Python intermedio no es un formato de serialización (ADR-01), justificación de
+  interfaces integradas del BME280 (ADR-02), parámetros de backoff exponencial del
+  ESP32 (ADR-03), mensaje LWT concreto (ADR-03), y título de ADR-05 renombrado a
+  "Selección de Lenguajes y Paradigma de Programación". Quedan pendientes en ADR-06 en
+  adelante ([^c5], [^c7]–[^c14]), fuera del alcance de semana 2-3.
+
+- **Imagen Docker de Mosquitto corregida**: `eclipse-mosquitto:2.0-alpine` (citada en
+  ADR-09) no existe en Docker Hub — se corrigió a `eclipse-mosquitto:2.0.18` (misma
+  familia alpine-based, ~22 MB), verificado con `docker pull` real.
+
+---
+
+## Coordinación pendiente con Fede
+
+- **Modelo de repos decidido: polyrepo + docker-compose.** Cada uno mantiene su propio
+  repo (individualmente evaluable para la materia). Cada mock se publica como imagen
+  Docker propia (GitHub Container Registry, gratis en repos públicos/con cuenta
+  personal). Un `docker-compose.yml` de integración referencia ambas imágenes por tag —
+  encaja con ADR-07/ADR-10 (microservicios y DBs ya son independientes por diseño). Fede
+  todavía no tiene su repo creado ni publica imagen — coordinar antes de que el
+  `docker-compose.yml` de este repo intente referenciar la suya.
+- **Confirmar con Fede la nomenclatura de tópicos corregida**: `meteo/sensor/<node_id>`
+  para BME280 (real y mock, mismo tópico) y `system/status/<node_id>` para LWT/heartbeats
+  — él todavía no vio ni confirmó este cambio.
+- **Confirmar con Fede los valores por default que se completaron en ADR-02/ADR-03**
+  (ver "Puntos abiertos... cerrados con Aldana" arriba): backoff exponencial del ESP32 y
+  formato del mensaje LWT. Son parte de su firmware — necesitan su OK antes de darlos
+  por definitivos.
 
 ---
 
@@ -58,8 +130,11 @@ parte del roadmap original, pero bloqueaban lo demás):
 
 ## Semana 3 — Docker + broker MQTT `[INT — primera integración con Fede]`
 
-- [ ] Levantar Eclipse Mosquitto (MQTT v5.0) vía Docker Compose (ADR-09, ADR-12) junto con Fede
-- [ ] Definir el topic de publicación para métricas Starlink
+- [x] Levantar Eclipse Mosquitto (MQTT v5.0) vía Docker Compose (ADR-09, ADR-12) — hecho
+      individualmente (`docker-compose.yml` + `services/broker/mosquitto.conf`),
+      verificado con `docker compose up` + pub/sub manual; falta correrlo junto con Fede
+- [x] Definir el topic de publicación para métricas Starlink — `starlink/metrics/<node_id>`
+      (ADR-04 corregido para coincidir con SRS/DER/Plan QA, ver "Corregido esta sesión")
 - [ ] Modificar el script/mock para publicar el JSON al broker en vez de imprimir por consola
 - [ ] Verificar mensajes con `mosquitto_sub` / MQTT Explorer
 - [ ] Confirmar, junto con Fede, que ambos mocks publican y los datos llegan al broker
