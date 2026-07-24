@@ -5,8 +5,21 @@ Módulo de adquisición de telemetría de red Starlink (latencia, jitter, throug
 
 En desarrollo. Semana 2 cerrada: esquema de datos (ADR-01) y validador Pydantic
 alineado al DER (`network_metrics`), suite de tests (53/53, 100% cobertura) y skill de
-control de consistencia ADR/DER/SRS/API (`adr-check`) activa. Todavía sin MQTT ni
-Docker (ver [cronograma](#) / checklist del proyecto).
+control de consistencia ADR/DER/SRS/API (`adr-check`) activa. Arrancando semana 3:
+broker MQTT (Mosquitto) vía `docker-compose.yml`, ya levantado y probado localmente
+(`docker compose up`). Todavía sin publicación del mock al broker (ver
+`docs/PROGRESS.md`).
+
+## Broker MQTT (Mosquitto)
+
+```bash
+cp .env.example .env   # ajustar si hace falta
+docker compose up -d
+```
+
+Levanta Mosquitto v5.0 (`eclipse-mosquitto:2.0.18`, ver ADR-09) en `localhost:1883`,
+sin autenticación (broker no expuesto fuera de la red local/Docker, ver ADR-14). Config
+en `services/broker/mosquitto.conf`.
 
 ## Estructura
 
