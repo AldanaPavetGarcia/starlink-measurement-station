@@ -165,7 +165,7 @@ Detalle completo y alternativas rechazadas: `docs/05_ADR.md`, Apéndice B.
 | ADR-05 | **Python 3.11** como lenguaje único de la capa RPi5; **C++ (Arduino IDE)** solo para el ESP32 | Se descartó stack híbrido de 3 lenguajes por ser inmanejable para el equipo. |
 | ADR-06 | Mock de telemetría Starlink: **Stateful, Random Walk + inyección de caos** (`CHAOS_PROFILE`: CALM/STORM/HANDOVER_HEAVY) | Sobre replay de CSV (estático) o ruido puro (sin inercia temporal, gráficos inútiles). |
 | ADR-07 | Mocks **desacoplados como microservicios Docker independientes** (`mock_bme280`, `mock_api_ext`) | Un mock unificado no valida la arquitectura real de productores concurrentes (viola SRP). |
-| ADR-08 | Backfill vía **ingesta orgánica E2E** con `SIMULATION_SPEED_FACTOR` (ej. 60x) | Los INSERT masivos por SQL solo prueban que existen tablas, no el pipeline completo. |
+| ADR-08 | Backfill vía **ingesta orgánica E2E** con `TIME_WARP_FACTOR` (ej. 60x) | Los INSERT masivos por SQL solo prueban que existen tablas, no el pipeline completo. |
 | ADR-09 | **Eclipse Mosquitto (MQTT v5.0)**, QoS 1, `clean_session=False`, LWT configurado | Sobre RabbitMQ (pesado para RPi5) y Redis Pub/Sub (sin persistencia offline). |
 | ADR-10 | **Database per Service**: `starlink_health_db` y `meteo_db` separadas | Evita cascading failure; correlación se hace en Grafana vía Data Blending (Outer Join by Time). |
 | ADR-11 | **PostgreSQL 16 + TimescaleDB 2.x** | Recomendación explícita del director. Hypertables, compresión columnar, continuous aggregates, retención automática. Sobre InfluxDB (curva de Flux) y Postgres puro (index thrashing a escala). |
@@ -183,7 +183,7 @@ El sistema completo se desarrolla y valida ANTES de contar con hardware físico:
   degradaciones ocasionales (spikes >200ms, pérdidas >5%) vía `CHAOS_PROFILE`.
 - **Mock BME280** (`mock_bme280`): cada 60s. Temperatura sinusoidal diaria (10–35°C, Córdoba),
   humedad inversamente correlacionada, presión con deriva lenta, + ruido gaussiano.
-- **Backfill**: mismo código de producción, acelerado con `SIMULATION_SPEED_FACTOR` (no scripts
+- **Backfill**: mismo código de producción, acelerado con `TIME_WARP_FACTOR` (no scripts
   SQL de seeding separados — eso no valida el pipeline real).
 - **Switching mock → hardware real**: apagar contenedor mock, encender servicio real. **Sin
   cambios de código** — mismo tópico MQTT, misma morfología de paquete (ADR-01).
