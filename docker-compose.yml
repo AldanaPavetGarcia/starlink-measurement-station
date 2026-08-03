@@ -107,8 +107,34 @@ services:
       STARLINK_DB_PASSWORD: ${STARLINK_DB_PASSWORD:-starlink_dev_password}
     profiles: [mocks, stress]
 
+  # Semana 8 (CLAUDE.md §1.1): dashboard "Red Starlink" (ADR-13). Único
+  # servicio con puerto expuesto al host a propósito (ADR-14). Provisioning
+  # como código: datasource + dashboard JSON se cargan solos al arrancar.
+  grafana:
+    image: grafana/grafana-oss:11.3.1
+    container_name: starlink-grafana
+    restart: unless-stopped
+    depends_on:
+      starlink_db:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-grafana_dev_password}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      STARLINK_DB_NAME: ${STARLINK_DB_NAME:-starlink_health}
+      STARLINK_DB_USER: ${STARLINK_DB_USER:-starlink_app}
+      STARLINK_DB_PASSWORD: ${STARLINK_DB_PASSWORD:-starlink_dev_password}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./services/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./services/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    profiles: [mocks, stress]
+
 volumes:
   mosquitto_data:
   mosquitto_log:
   starlink_db_data:
   station_config_db_data:
+  grafana_data:
