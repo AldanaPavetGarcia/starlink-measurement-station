@@ -5,75 +5,189 @@
 > Convención: **[IND]** trabajo individual · **[INT]** integración con el módulo de Fede ·
 > **[HW]** requiere hardware real.
 
-**Última actualización:** semanas 1 a 5 completadas del lado individual de Aldana.
+**Última actualización:** semanas 1 a 8 completas del lado Starlink (semana 6 en
+adelante, **solo lado Starlink** — ver justificación abajo; Fede todavía no arrancó
+su módulo). Semanas 7 y 8: se creó `station_config_db` (tercera instancia de DB,
+ver "Corregido esta sesión" — conflicto ADR-10 vs. DER sobre cuántas bases hay),
+se validaron los índices/CHECK constraints de `network_metrics` contra ~2500 filas
+backfillate reales, y se armó el dashboard "Red Starlink" en Grafana (datasource +
+5 paneles provisionados como código, ADR-13), verificado con datos reales vía la
+API de Grafana. Detalle completo en las secciones de semana 7/8 más abajo.
+
+Semana 6: se decidió no bloquearse en la integración conjunta y construir el
+consumer para el dominio `starlink/metrics/` con el dominio meteo ya enrutado pero
+sin persistencia real (`MeteoDB` es un stub, `src/consumer/db.py`), listo para que
+Fede lo complete cuando tenga su tópico y esquema. Implementado: `services/db/init_starlink_health.sql`
+(hypertable `network_metrics` + `network_tests` + continuous aggregates
+`net_hourly`/`net_daily`, copiado de `docs/06_DER.md` §7.1 con una corrección, ver
+"Corregido esta sesión"), `src/consumer/` (`router.py`: `ConsumerRouter.route_message`
+enruta por prefijo de tópico exactamente como especifica la suite UT-03 de
+`docs/08_Plan_QA.md`; `db.py`: `NetHealthDB` con ORM SQLAlchemy declarativo
+-- ADR-04 -- e INSERT idempotente vía `ON CONFLICT (time, node_id) DO NOTHING`
+sobre la PK compuesta, necesario porque QoS 1/ADR-09 es *at-least-once* y el
+consumer usa ACK manual + sesión persistente para forzar reentrega ante fallos
+transitorios de DB; `__main__.py`: cliente MQTT con `manual_ack=True`, sesión
+persistente MQTTv5 -- `clean_start=False` + `SessionExpiryInterval` infinito --
+y logging JSON igual al de `mock_starlink`). Nuevo `Dockerfile.consumer` +
+`requirements-consumer.txt`, y `starlink_db`/`consumer` sumados a
+`docker-compose.yml` bajo el mismo perfil `mocks` que ya usaba el mock, con
+`timescale/timescaledb:2.17.2-pg16` pinneado (verificado con `docker pull`, no
+`:latest`, ADR-12). Verificado end-to-end real con `docker compose --profile mocks
+up --build`: fila persistida en `network_metrics` (IT-01-01), reentrega QoS 1
+confirmada matando y reiniciando el `consumer` mientras el mock seguía publicando
+-- el broker retuvo el mensaje y apareció en la DB recién al reconectar (IT-01-03,
+RNF-05). Tests nuevos: `tests/test_consumer_router.py` (suite UT-03 completa,
+UT-03-01 a UT-03-05) y `tests/test_consumer_db.py`. 77/77 tests pasando
+(`PYTHONPATH=src pytest tests/`).
+
 ADR-01 a ADR-05 revisados y sus puntos abiertos cerrados (ver "Corregido esta
 sesión") — **falta que Fede confirme los puntos de ADR-02/ADR-03 (BME280, backoff
 ESP32, LWT) que se completaron con valores por default**. Mock stateful (ADR-06),
 publisher MQTT con LWT y empaquetado Docker (ADR-07) implementados y verificados
 contra un broker real (`docker compose --profile mocks up --build`, pub/sub y
 `docker kill` para el LWT, todo a mano). `TIME_WARP_FACTOR` (ADR-08) funcionando.
-Próximo corte real: **semana 6**, consumer MQTT conjunto con Fede.
+Todo el drift de documentación detectado esta sesión (vocabulario SRS/DER/ADR-06,
+backfill SRS §10.3 vs. ADR-08, fila iperf3 de ADR-04, "stateless" vs. mock
+stateful, fixture del Plan de QA, vocabulario "fantasma" de `POST /ingest/starlink`
+en `docs/07_API_REST.md`, y la estructura envelope + `metrics` anidado del payload,
+ahora documentada explícitamente en ADR-01) se resolvió y documentó con
+justificación — no quedó ningún punto abierto para el director de este lado. Sí
+queda un punto de coordinación con Fede (mismo patrón `station_id`/`source_module`
+en `POST /ingest/env`, ver abajo).
+Próximo corte real: **semana 9**, endpoints FastAPI (`/metrics/starlink`,
+`/summary`, `/latest`) + auth por API Key + logging estructurado en el backend.
+Semanas 11-24 del roadmap siguen esperando, en su mayoría, a que Fede tenga su
+mock/tópico meteo andando (`MeteoDB` real) o a hardware real (semana 10).
 
 ---
 
 ## Pendiente — revisar con director/co-director
 
-- **Drift entre `docs/03_SRS.md` §5.1 y `docs/06_DER.md` (network_metrics) / código**:
-  el SRS describe el paquete de telemetría Starlink con otro vocabulario y unidades
-  (`throughput_down_mbps`/`throughput_up_mbps` en Mbps, `obstruction_pct` y
-  `signal_quality` en vez de `is_obstructed`/`snr_db`), que no coincide con el DER ni
-  con `src/mock_starlink/schema.py` (que sigue al DER: `throughput_down/up_bps` en bps,
-  `is_obstructed` booleano, `snr_db` en dB). Es un drift preexistente, no introducido
-  por ningún cambio reciente de código — detectado por la skill `adr-check`. No se
-  resuelve unilateralmente: queda anotado acá para que el director/co-director defina
-  cuál de los dos documentos se actualiza (ver `CLAUDE.md` §12, "Decisiones
-  pendientes").
-
-- **Alcance de `net_health/iperf_test` en ADR-04**: la tabla de tópicos de ADR-04 tiene
-  una fila para un test activo con iPerf3 que no está cubierta por el SRS y cuyo alcance
-  no quedó claro (comentario propio [^c5] en el ADR: "no queda claro, para qué?"). No
-  forma parte del "Alcance técnico del módulo Starlink" descrito en `CLAUDE.md` §1.1
-  (que solo cubre telemetría pasiva vía gRPC). Definir con el director si iPerf3 activo
-  entra en el alcance del PI o si esa fila se elimina del ADR.
-
-- **Decisión pendiente del director sobre "stateless" (ADR-12, [^c14]) vs. mock stateful
-  (ADR-06)**: el director dejó un comentario pidiendo aclarar que "las apps van a ser
-  stateless", lo cual en principio choca con que ADR-06 define el mock de Starlink como
-  explícitamente stateful (random walk con memoria del último valor). No es
-  necesariamente una contradicción real: "stateful" en ADR-06 describe la lógica de
-  generación de datos dentro del proceso en memoria (para que los gráficos tengan
-  inercia temporal realista), mientras que "stateless" en el sentido de infraestructura
-  (12-factor apps) se refiere a que el contenedor no depende de un volumen local
-  persistente para funcionar — puede reiniciarse sin coordinación especial porque el
-  estado que importa (las métricas ya generadas) vive en la base de datos, no en el
-  mock. Falta dejarlo explícito por escrito en el ADR para que no quede ambiguo — no
-  resuelto todavía.
-
-- **ADR-06 (tabla estadística del mock) tiene el mismo drift de vocabulario que ya
-  estaba anotado arriba entre SRS/DER**: usa `throughput_down/up_mbps`,
-  `obstruction_pct` y `signal_quality` (vocabulario del SRS) en vez de
-  `throughput_down/up_bps`, `is_obstructed` y `snr_db` (vocabulario del DER y de
-  `schema.py`). No es un conflicto nuevo, es el mismo — se extiende la nota para que
-  el director sepa que también afecta a ADR-06. La implementación del mock stateful
-  sigue al DER/`schema.py` (ya es el estándar de facto del proyecto).
-
-- **`docs/03_SRS.md` §10.3 contradice a ADR-08 sobre el mecanismo de backfill**: el SRS
-  describe un "script de backfill" que inserta directamente en las hypertables vía SQL
-  — exactamente la Alternativa A que ADR-08 rechaza explícitamente a favor de la
-  ingesta orgánica E2E vía `TIME_WARP_FACTOR`. La implementación de semana 5 sigue a
-  ADR-08 (es lo que pide el roadmap de `CLAUDE.md` §1.1); queda anotado para que el
-  director defina si el SRS se actualiza.
-
-- **El fixture de ejemplo embebido en `docs/08_Plan_QA.md` (bloque `conftest.py`) usa
-  un tercer vocabulario** (`station_id`, `source_module`, `pop_ping_latency_ms`,
-  `pop_ping_drop_rate`, `downlink/uplink_throughput_bps`) que no coincide ni con el DER
-  ni con `schema.py` ni con el resto del propio Plan de QA (las tablas UT-01/UT-04 sí
-  usan `node_id`/`metrics.latency_ms`/etc.). Parece un borrador viejo — no se usa como
-  referencia para la implementación.
+Ninguno por ahora del lado de este módulo. Ver "Coordinación pendiente con Fede" más
+abajo para los puntos que sí requieren su confirmación.
 
 ---
 
 ## Corregido esta sesión
+
+- **Conflicto ADR-10 (Database per Service) vs. `docs/06_DER.md` §1 sobre
+  cuántas bases de datos hay**: ADR-10 decía explícitamente "dos instancias"
+  (`starlink_health_db`, `meteo_db`), pero el DER siempre listó tres
+  (`starlink_health`, `meteo_data`, y `station_config` — con `station_metadata`/
+  `sensor_catalog`). No estaba anotado como conflicto conocido en este archivo,
+  así que no lo resolví por mi cuenta: se lo presenté al usuario (Aldana) en la
+  sesión, decidió una tercera instancia liviana (`station_config_db`, PostgreSQL
+  plano sin TimescaleDB — son catálogos chicos, no series temporales). ADR-10
+  enmendado con la justificación completa (sigue "Propuesto", no se tocó el
+  estado). Necesario para semana 7 (`station_metadata` es la tabla contra la
+  que se valida la coherencia de `node_id`).
+
+- **`add_continuous_aggregate_policy('net_daily', ...)` con una ventana de
+  refresco inválida en `docs/06_DER.md` §7.1 y, por copia, en
+  `services/db/init_starlink_health.sql`**: `start_offset => '2 days',
+  end_offset => '1 day'` da una ventana de 1 bucket (`net_daily` usa
+  `time_bucket('1 day', ...)`), y TimescaleDB exige al menos 2 buckets — falla
+  en runtime con `ERROR: policy refresh window too small`, reproducido contra
+  un servidor TimescaleDB real (semana 7). No es un problema de diseño, es un
+  parámetro que nunca se había probado contra un servidor real. Se corrigió a
+  `start_offset => '3 days'` (ventana de 2 buckets, misma proporción que
+  `net_hourly`, que sí funcionaba) en ambos archivos, y se confirmó con
+  volúmenes Docker limpios que el init script corre sin errores y ambas
+  políticas (`net_hourly`, `net_daily`) quedan registradas
+  (`timescaledb_information.jobs`).
+
+- **`PRIMARY KEY (time, node_id)` faltante en el bloque SQL de referencia de
+  `docs/06_DER.md` §7.1 (`network_metrics`, `network_tests`)**: la sección
+  "Convenciones" del propio DER ya establecía PK compuesta `(time, node_id)`
+  para toda hypertable, pero el `CREATE TABLE` de ejemplo no la declaraba —
+  drift interno del documento contra sí mismo, no causado por el código. Se
+  agregó la PK en el DER y en `services/db/init_starlink_health.sql` (la
+  implementación real). Importa porque el consumer deduplica reentregas QoS 1
+  (ADR-09, at-least-once) con `ON CONFLICT (time, node_id) DO NOTHING`, que
+  necesita un índice único sobre esas columnas para funcionar — verificado
+  end-to-end (ver semana 6 arriba).
+
+- **ADR-10, sección "Consecuencias e Implicaciones", todavía describía el
+  routing del consumer con la nomenclatura de tópicos vieja** (`tópicos con
+  /net_health/ ... /meteo/`), previa a la corrección de la tabla de tópicos de
+  ADR-04 (`docs/PROGRESS.md`, sesión anterior). Se actualizó a los prefijos
+  reales (`starlink/`, `meteo/`), que es literalmente lo que implementa
+  `src/consumer/router.py:ConsumerRouter` esta sesión.
+
+- **Estructura del payload (envelope + `metrics` anidado) documentada explícitamente
+  en ADR-01, y `docs/03_SRS.md` §5.1 corregido para reflejarla**: `schema.py` ya
+  publicaba `{schema_version, node_id, timestamp, metrics: {latency_ms, ...}}`, pero
+  ningún documento explicaba por qué la estructura es anidada, y la tabla del SRS
+  §5.1 la mostraba como si fuera plana. Decisión (documentada en ADR-01, sección
+  "Estructura concreta del payload"): se mantiene anidada — separa el ciclo de vida
+  del envelope (identidad del paquete) del de `metrics` (puede evolucionar con
+  nuevos firmwares de la antena) sin acoplar la validación de uno al otro, y ya está
+  implementada, testeada y verificada end-to-end contra un broker real desde semana
+  4-5 (revertir a plano hubiera significado invalidar esa verificación sin ninguna
+  ganancia real). El SRS §5.1 se reescribió para mostrar la estructura envelope +
+  `metrics` con un ejemplo JSON completo, en vez de la tabla plana anterior. No
+  aplica a `network_metrics` ni a los GET de la API REST, que son planos por
+  naturaleza (columnas SQL) — sin cambios ahí.
+
+- **RF-03 (`docs/03_SRS.md`) todavía citaba `obstruction_pct, signal_quality`** en la
+  descripción del requerimiento — mismo drift, distinta ubicación (no era la tabla
+  §5.1 que ya se había corregido). Actualizado a `is_obstructed`, `snr_db`,
+  `satellite_count`.
+
+- **`docs/07_API_REST.md` — `POST /ingest/starlink` usaba un tercer vocabulario,
+  inconsistente incluso con los GET del mismo documento**: el ejemplo de request body
+  y el modelo Pydantic `StarlinkMetricsIn`/`StarlinkPayloadIn` (§9.1) usaban
+  `station_id`, `source_module`, `pop_ping_latency_ms`, `pop_ping_drop_rate` (fracción
+  0–1, no porcentaje), `downlink/uplink_throughput_bps` — ninguno de estos existe en
+  `src/mock_starlink/schema.py`, y ni siquiera coincidían con los GET del propio
+  `docs/07_API_REST.md` (`StarlinkMetricOut`), que ya usaban el vocabulario correcto
+  del DER. Es el mismo vocabulario "fantasma" que tenía el fixture de
+  `docs/08_Plan_QA.md` (ya corregido arriba) — parece un borrador viejo copiado a dos
+  documentos. Se corrigió a `node_id`/`latency_ms`/`jitter_ms` (faltaba por completo)/
+  `packet_loss_pct`/`throughput_down_bps`/`throughput_up_bps`, con los mismos bounds
+  que `schema.py:StarlinkMetrics` (`snr_db` ge=-20/le=30, etc.), y se sacó
+  `source_module` (no existe en el esquema real). No se tocó `POST /ingest/env` ni
+  `EnvPayloadIn` (mismo patrón `station_id`/`source_module`) porque es el módulo de
+  Fede — queda anotado en "Coordinación pendiente con Fede" abajo.
+
+- **Drift de vocabulario/unidades SRS §5.1 y ADR-06 vs. DER/código**: se corrigió
+  `docs/03_SRS.md` §5.1 y la tabla estadística de ADR-06 para usar
+  `throughput_down/up_bps` (en vez de Mbps), `is_obstructed`/`snr_db` (en vez de
+  `obstruction_pct`/`signal_quality`), y se agregó `satellite_count` (faltaba en
+  ambos). Gana el DER/`schema.py` porque son más específicos técnicamente (bps en
+  BIGINT porque Starlink puede superar 2 Gbps; `is_obstructed`/`snr_db` son los
+  campos reales que expone el gRPC de la antena) y porque ya era el vocabulario que
+  seguían 3 de los 4 documentos autoritativos más el código. La tabla de ADR-06
+  además se amplió con filas de `snr_db` y `satellite_count` (no estaban) para que
+  documente completo lo que `mock.py` ya calibra vía `CHAOS_PARAMS`.
+
+- **`docs/03_SRS.md` §10.3 corregido para coincidir con ADR-08**: describía un
+  "script de backfill" con INSERT SQL directo a las hypertables — la Alternativa A
+  que ADR-08 rechaza explícitamente. Se reescribió para describir la ingesta
+  orgánica E2E vía `TIME_WARP_FACTOR`, que es lo que está implementado desde semana 5.
+
+- **Fila `nodo/lit-01/net_health/iperf_test` eliminada de la tabla de tópicos de
+  ADR-04**: no estaba cubierta por el SRS ni por el "Alcance técnico" de
+  `CLAUDE.md` §1.1 (solo telemetría pasiva vía gRPC, sin tests activos), rompía la
+  convención domain-first del resto de la tabla, y de agregarse en el futuro
+  correspondería a la tabla `network_tests` del DER (§3.2), no a `network_metrics`
+  (que es a donde la enrutaba la fila eliminada). Comentario [^c5] marcado resuelto.
+
+- **Aclaración "stateless" (ADR-12) vs. mock stateful (ADR-06)**: se agregó una
+  aclaración en el Contexto de ADR-12 distinguiendo "stateless" a nivel de
+  infraestructura (12-factor: ningún contenedor depende de un volumen local
+  persistente, así que la migración local→nube funciona con solo cambiar `.env`) de
+  "stateful" a nivel de lógica de generación de datos en memoria (ADR-06: el mock
+  recuerda el último valor de latencia para el random walk, pero es estado
+  transitorio de un proceso reiniciable, no estado de infraestructura). No era una
+  contradicción real. Comentario [^c14] del director marcado resuelto.
+
+- **Fixture de ejemplo en `docs/08_Plan_QA.md` corregido**: el bloque `conftest.py`
+  de referencia usaba un tercer vocabulario (`station_id`, `source_module`,
+  `pop_ping_latency_ms`, `pop_ping_drop_rate`, `downlink/uplink_throughput_bps`) que
+  no se usa en ningún test real. Se actualizó al esquema real de `schema.py`
+  (`node_id`, `metrics.latency_ms`/`jitter_ms`/`packet_loss_pct`/
+  `throughput_down_up_bps`/`snr_db`/`is_obstructed`/`satellite_count`).
 
 - **Drift de nomenclatura de tópicos MQTT (ADR-04 vs. resto)**: la tabla de tópicos de
   ADR-04 usaba `nodo/lit-01/net_health/starlink_grpc` / `nodo/lit-01/meteo/bme280_*`,
@@ -141,6 +255,20 @@ Próximo corte real: **semana 6**, consumer MQTT conjunto con Fede.
 
 ## Coordinación pendiente con Fede
 
+- **`MeteoDB` (`src/consumer/db.py`) es un stub, no una implementación real** —
+  `ConsumerRouter` ya enruta `meteo/sensor/<node_id>` y `meteo/external/<node_id>`
+  hacia ella (semana 6), pero solo loguea un WARNING y descarta el mensaje sin
+  persistir. Cuando Fede tenga su mock/tópico meteo, hace falta reemplazar el
+  stub por un gateway real a `meteo_db` (mismo patrón que `NetHealthDB`, ORM
+  SQLAlchemy declarativo sobre el esquema `env_metrics` de `docs/06_DER.md`
+  §3.3) — coordinar con él si prefiere escribirlo él mismo dado que es su
+  dominio, o si conviene que yo lo arme siguiendo el mismo patrón que
+  `NetworkMetric`.
+- **`POST /ingest/env` y `EnvPayloadIn` (`docs/07_API_REST.md` §9.2) tienen el mismo
+  patrón `station_id`/`source_module` que se acaba de corregir del lado Starlink** —
+  no se tocó porque es su esquema (BME280/ambiental), pero probablemente valga la pena
+  que lo revise contra lo que realmente vaya a implementar, antes de que alguien copie
+  ese modelo Pydantic tal cual a la semana 9.
 - **Modelo de repos decidido: polyrepo + docker-compose.** Cada uno mantiene su propio
   repo (individualmente evaluable para la materia). Cada mock se publica como imagen
   Docker propia (GitHub Container Registry, gratis en repos públicos/con cuenta
@@ -241,29 +369,71 @@ parte del roadmap original, pero bloqueaban lo demás):
       todavía (no existen hasta semana 6-7). No se sobre-afirma como "tuneado" — retomar en
       semana 7 (índices) o semana 21 (stress test) con la DB real ya levantada.
 
-## Semana 6 — Consumer MQTT conjunto `[INT — segunda integración con Fede]`
+## Semana 6 — Consumer MQTT conjunto `[INT — segunda integración con Fede]` — Starlink [IND] ✅, meteo pendiente de Fede
 
-- [ ] Diseñar junto a Fede el consumer que escucha ambos topics (Starlink y BME280/meteo)
-- [ ] Implementar Database per Service (ADR-10): `starlink_health_db` y `meteo_db` separadas
-- [ ] Insertar métricas Starlink en la hypertable `network_metrics`
-- [ ] Manejar errores de deserialización sin tumbar el consumer
-- [ ] Probar el flujo end-to-end: mock → broker → consumer → TimescaleDB
+- [ ] ~~Diseñar junto a Fede el consumer que escucha ambos topics~~ — Fede todavía no
+      arrancó su módulo (ver `docs/PROGRESS.md` arriba); se construyó solo con
+      código, sin bloquear en una sesión de diseño conjunto que no podía pasar
+      todavía. El router (`src/consumer/router.py:ConsumerRouter`) ya está
+      preparado para el dominio meteo (`meteo/sensor/`, `meteo/external/`) —
+      cuando Fede tenga su tópico, falta reemplazar `MeteoDB` (stub) por una
+      implementación real, no rediseñar el routing.
+- [x] Implementar Database per Service (ADR-10): `starlink_health_db` levantada
+      (`starlink_db` en `docker-compose.yml`) — `meteo_db` queda para Fede.
+- [x] Insertar métricas Starlink en la hypertable `network_metrics`
+- [x] Manejar errores de deserialización sin tumbar el consumer (`ValidationError`
+      de Pydantic se loguea y descarta; error de DB no propaga, retiene el ACK)
+- [x] Probar el flujo end-to-end: mock → broker → consumer → TimescaleDB (verificado
+      a mano con `docker compose --profile mocks up --build`, incluida reentrega
+      QoS 1 con el consumer caído)
 
-> 🔗 Milestone: convergen ambos módulos por segunda vez, ahora con persistencia real.
+> 🔗 Milestone: dominio Starlink integrado end-to-end con persistencia real. La
+> "segunda integración con Fede" propiamente dicha (escuchar su tópico real, no
+> solo tenerlo enrutado) queda pendiente de que él tenga su mock/tópico meteo.
 
-## Semana 7 — Validación en TimescaleDB `[IND]`
+## Semana 7 — Validación en TimescaleDB `[IND]` ✅ COMPLETA
 
-- [ ] Crear los índices de `network_metrics` (`idx_netmet_node_time`, `idx_netmet_loss`, `idx_netmet_obstructed`)
-- [ ] Probar consultas filtradas por `node_id` y rango temporal
-- [ ] Verificar que `packet_loss_pct` respeta el CHECK constraint (0–100)
-- [ ] Confirmar que `node_id` coincide entre el payload MQTT y `station_metadata`
+- [x] Crear los índices de `network_metrics` (`idx_netmet_node_time`, `idx_netmet_loss`,
+      `idx_netmet_obstructed`) — ya los crea `services/db/init_starlink_health.sql`
+      desde semana 6.
+- [x] Probar consultas filtradas por `node_id` y rango temporal — `EXPLAIN ANALYZE`
+      contra ~2500 filas backfillate (`TIME_WARP_FACTOR=3600` real, no INSERT SQL
+      directo, ADR-08). `idx_netmet_loss` e `idx_netmet_obstructed` se usan siempre
+      (Index Scan confirmado). `idx_netmet_node_time` se usa con ventanas temporales
+      angostas; con una ventana amplia y un solo nodo el planner elige Seq Scan
+      porque casi todas las filas matchean (selectividad ~100% con un solo nodo) —
+      comportamiento correcto de Postgres, no un bug. El índice va a ganar
+      relevancia real recién con más de un nodo (el "modo comparativo" que el
+      propio DER cita como motivo del índice).
+- [x] Verificar que `packet_loss_pct` respeta el CHECK constraint (0–100) — probado
+      con INSERT directo (150 y throughput_down_bps=-100), ambos rechazados con
+      `chk_netmet_loss`/`chk_netmet_down`; INSERT válido de control aceptado.
+- [x] Confirmar que `node_id` coincide entre el payload MQTT y `station_metadata` —
+      creada `station_config_db` (ver "Corregido esta sesión": ADR-10 tenía un
+      conflicto con el DER sobre cuántas instancias de DB hay). `station_metadata`
+      seedeada con `lit-cordoba-01`; confirmado que todo `node_id` presente en
+      `network_metrics` está registrado ahí (sin huérfanos).
 
-## Semana 8 — Dashboard Grafana `[IND]`
+## Semana 8 — Dashboard Grafana `[IND]` ✅ COMPLETA
 
-- [ ] Conectar Grafana a `starlink_health_db`
-- [ ] Armar panel de `latency_ms`, `jitter_ms` y `packet_loss_pct` en el tiempo
-- [ ] Armar panel de `throughput_down/up_bps` (convertido a Mbps)
-- [ ] Agregar panel de `satellite_count` e `is_obstructed` para correlacionar eventos
+- [x] Conectar Grafana a `starlink_health_db` — `services/grafana/provisioning/datasources/starlink.yml`,
+      datasource provisionado automáticamente al arrancar, `health check` = "Database
+      Connection OK" verificado vía API real.
+- [x] Armar panel de `latency_ms`, `jitter_ms` y `packet_loss_pct` en el tiempo —
+      2 paneles (latencia+jitter juntos por unidad compartida "ms"; packet loss
+      aparte por ser porcentaje).
+- [x] Armar panel de `throughput_down/up_bps` (convertido a Mbps) — conversión
+      `/1000000.0` en la query SQL del panel.
+- [x] Agregar panel de `satellite_count` e `is_obstructed` para correlacionar
+      eventos — panel único, `is_obstructed::int` superpuesto a `satellite_count`.
+      Bonus fuera del checklist original pero ya nombrado en la taxonomía de
+      dashboards de ADR-13 para "Red Starlink": histograma de distribución de
+      latencia.
+      Dashboard `services/grafana/dashboards/red_starlink.json`, con variable de
+      plantilla `node_id` (multi-select, para cuando haya más de un nodo).
+      Verificado con datos reales vía `/api/ds/query` (no pude abrir un browser en
+      este entorno, pero confirmé que las queries devuelven series reales con
+      valores correctos — latency_ms/jitter_ms multi-serie desde una sola query SQL).
 
 ## Semana 9 — Backend FastAPI + logging estructurado `[INT — logging antes del hardware real]`
 
