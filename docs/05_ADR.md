@@ -46,7 +46,7 @@ Este documento es de carácter vivo: cada ADR puede ser superado por uno posteri
 | **ADR-07** | Mocks de Sensores Ambientales y APIs Externas | Simulación | Mocks desacoplados como microservicios Docker independientes | **Propuesto** |
 | **ADR-08** | Estrategia de Población de Bases de Datos | Simulación | Ingesta orgánica E2E + variable TIME_WARP_FACTOR para backfill | **Propuesto** |
 | **ADR-09** | Message Broker | Persistencia | Eclipse Mosquitto (MQTT v5.0) | **Propuesto** |
-| **ADR-10** | Patrón Database per Service | Persistencia | Dos instancias independientes: starlink_health_db y meteo_db | **Propuesto** |
+| **ADR-10** | Patrón Database per Service | Persistencia | Tres instancias independientes: starlink_health_db, meteo_db y station_config_db | **Propuesto** |
 | **ADR-11** | Motor de Base de Datos de Series Temporales | Persistencia | PostgreSQL 16 + extensión TimescaleDB sobre InfluxDB y Postgres puro | **Propuesto** |
 | **ADR-12** | Contenerización de Infraestructura | Persistencia | Docker Engine + Docker Compose V2; todo contenerizado | **Propuesto** |
 | **ADR-13** | Plataforma de Visualización y Dashboards | Observabilidad | Grafana OSS sobre desarrollo frontend a medida | **Propuesto** |
@@ -634,30 +634,34 @@ El sistema recolecta dos dominios de datos fundamentalmente distintos: telemetr�
 
 ### Alternativas Consideradas
 
-| **Criterio** | **Alt. A — Base de Datos Monolítica Unificada** | **Alt. B — Database per Service (dos instancias) ** |
+| **Criterio** | **Alt. A — Base de Datos Monolítica Unificada** | **Alt. B — Database per Service (tres instancias) ** |
 | --- | --- | --- |
 | Aislamiento de fallos | ❌ Una query costosa en la tabla de clima puede bloquear la inserción de métricas de red | ✅ Un problema en meteo_db no afecta starlink_health_db. Fallo aislado. |
 | Control de acceso (RBAC) | ⚠️ Se puede implementar con esquemas y roles SQL, pero en la misma instancia | ✅ Credenciales completamente separadas por base de datos. Principio de Menor Privilegio nativo. |
 | Escalabilidad diferencial | ❌ Escalar la DB escala ambos dominios juntos (desperdicio) | ✅ Se puede mover starlink_health_db a un servidor más potente sin mover meteo_db |
 | Backups focalizados | ❌ Backup completo de toda la DB aunque solo cambie un dominio | ✅ pg_dump de starlink_health_db de forma independiente y frecuente sin afectar meteo_db |
 | JOIN cruzado entre dominios | ✅ Posible con SQL estándar | ❌ No posible a nivel SQL. Se resuelve en la capa de presentación (Grafana Data Blending). |
-| Complejidad de despliegue | ✅ Un solo contenedor PostgreSQL | ⚠️ Dos contenedores PostgreSQL. Manejable con Docker Compose. |
+| Complejidad de despliegue | ✅ Un solo contenedor PostgreSQL | ⚠️ Tres contenedores PostgreSQL. Manejable con Docker Compose. |
 
 ### Decisión
 
-**✅ Decisión: Alternativa B — Database per Service. Dos instancias TimescaleDB independientes.**
+**✅ Decisión: Alternativa B — Database per Service. Tres instancias PostgreSQL independientes.**
 
-starlink_health_db: almacena todas las métricas de red (latencia, jitter, throughput, packet loss, obstruction). meteo_db: almacena todos los datos ambientales (sensor local BME280, APIs externas). Cada instancia tiene sus propias credenciales, volumen Docker y configuración de TimescaleDB. La correlación entre dominios se realiza en Grafana mediante Data Blending (Outer Join by Time).
+starlink_health_db (TimescaleDB): métricas de red (latencia, jitter, throughput, packet loss, obstruction). meteo_db (TimescaleDB): datos ambientales (sensor local BME280, APIs externas). **station_config_db (PostgreSQL 16 plano, sin extensión TimescaleDB)**: catálogo de nodos y sensores (`station_metadata`, `sensor_catalog`, docs/06_DER.md §5.1-§5.2) — agregada esta sesión (semana 7), ver nota abajo. Cada instancia tiene sus propias credenciales, volumen Docker y configuración. La correlación entre dominios de series temporales se realiza en Grafana mediante Data Blending (Outer Join by Time).
+
+> **Corrección semana 7 (`docs/PROGRESS.md`):** esta sección decía "dos instancias" y no mencionaba `station_config_db`, pese a que `docs/06_DER.md` §1 ya listaba tres bases de datos (`starlink_health`, `meteo_data`, `station_config`) desde antes de esta sesión — drift entre ADR-10 y el DER, sin nota previa en `docs/PROGRESS.md`, detectado al implementar la validación de coherencia de `node_id` de semana 7. Se resolvió a favor de una tercera instancia porque: (1) el DER ya especificaba su esquema completo (tablas relacionales chicas, sin hypertable, `sin CAGG`), (2) `station_metadata`/`sensor_catalog` no pertenecen exclusivamente a ningún dominio — son metadata de referencia consultada tanto por Starlink (`node_id`) como por el módulo de Fede (`sensor_catalog` referencia BME280) — meterlas en cualquiera de las otras dos violaría el aislamiento de fallos que es la motivación central de este mismo ADR, y (3) no es TimescaleDB: son tablas de catálogo "solo lectura en producción" (docs/06_DER.md §5.1), no series temporales, así que no necesita hypertables/compresión/retención — un PostgreSQL simple alcanza y es más liviano.
 
 ### Consecuencias e Implicaciones
 
-- El consumer MQTT (el router de base de datos) analiza el tópico de cada mensaje entrante para decidir a qué base de datos insertar. La lógica es simple: tópicos con /net_health/ van a starlink_health_db; tópicos con /meteo/ van a meteo_db.
+- El consumer MQTT (el router de base de datos) analiza el tópico de cada mensaje entrante para decidir a qué base de datos insertar. La lógica es simple: tópicos que empiezan con `starlink/` van a starlink_health_db; tópicos que empiezan con `meteo/` van a meteo_db (implementado en `src/consumer/router.py:ConsumerRouter`, semana 6 — ver `docs/PROGRESS.md`). Corregido de la redacción anterior (`/net_health/`, `/meteo/`), que citaba una nomenclatura de tópicos previa a la corrección de ADR-04 y ya no existía en ningún documento. `station_config_db` no participa del routing MQTT — se consulta directamente (lookup de catálogo), no recibe mensajes.
 
-- Grafana se configura con dos datasources independientes: uno apuntando a starlink_health_db y otro a meteo_db. Los dashboards de correlación usan el operador de transformación Outer Join by Time para alinear ambas series.
+- Grafana se configura con datasources independientes: starlink_health_db y (cuando exista) meteo_db. Los dashboards de correlación usan el operador de transformación Outer Join by Time para alinear ambas series. `station_config_db` no necesita datasource propio en Grafana por ahora (no hay paneles que la consulten todavía).
 
-- Los scripts de inicialización SQL (init.sql) son separados por base de datos y se ejecutan como parte de la configuración del contenedor Docker.
+- Los scripts de inicialización SQL (init.sql) son separados por base de datos y se ejecutan como parte de la configuración del contenedor Docker (`services/db/init_starlink_health.sql`, `services/db/init_station_config.sql`).
 
-- En la migración a nube (Fase 2), las dos bases de datos pueden migrarse independientemente o a servidores distintos, maximizando la flexibilidad operativa.
+- `network_metrics.node_id` y `sensor_catalog.node_id` referencian `station_metadata.node_id` como FK implícita (no hay FK real entre bases de datos distintas — Postgres no lo permite entre instancias separadas): la coherencia se valida por convención/testing, no por constraint. `sensor_catalog` sí tiene una FK real a `station_metadata` porque ambas viven en `station_config_db`.
+
+- En la migración a nube (Fase 2), las tres bases de datos pueden migrarse independientemente o a servidores distintos, maximizando la flexibilidad operativa.
 
 ## ADR-11 — Motor de Base de Datos: InfluxDB vs. PostgreSQL puro vs. PostgreSQL + TimescaleDB
 
@@ -734,7 +738,7 @@ Adicionalmente, la directriz explícita del director exige que la migración de 
 
 **✅ Decisión: Alternativa B — Docker Engine + Docker Compose V2. Todo contenerizado.**
 
-Cada microservicio tiene su propio Dockerfile. Un único docker-compose.yml orquesta todos los servicios: broker MQTT, dos instancias TimescaleDB, consumer router, backend FastAPI, Grafana, mocks. Las imágenes base son slim/alpine para minimizar el tamaño. Las versiones de dependencias están pinneadas (no se usa :latest en producción).
+Cada microservicio tiene su propio Dockerfile. Un único docker-compose.yml orquesta todos los servicios: broker MQTT, dos instancias TimescaleDB (starlink_health_db, meteo_db) + una instancia PostgreSQL plana (station_config_db, ADR-10), consumer router, backend FastAPI, Grafana, mocks. Las imágenes base son slim/alpine para minimizar el tamaño. Las versiones de dependencias están pinneadas (no se usa :latest en producción).
 
 ### Pros y Contras
 

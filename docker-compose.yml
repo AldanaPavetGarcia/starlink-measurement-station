@@ -61,6 +61,27 @@ services:
       retries: 5
     profiles: [mocks, stress]
 
+  # ADR-10 (enmendado semana 7): tercera instancia, catálogo de nodos/sensores
+  # (docs/06_DER.md §5.1-§5.2). PostgreSQL plano (sin TimescaleDB): son tablas
+  # relacionales chicas, no series temporales. Tampoco expuesta (ADR-14).
+  station_config_db:
+    image: postgres:16.4-alpine
+    container_name: station-config-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${STATION_CONFIG_DB_NAME:-station_config}
+      POSTGRES_USER: ${STATION_CONFIG_DB_USER:-station_config_app}
+      POSTGRES_PASSWORD: ${STATION_CONFIG_DB_PASSWORD:-station_config_dev_password}
+    volumes:
+      - station_config_db_data:/var/lib/postgresql/data
+      - ./services/db/init_station_config.sql:/docker-entrypoint-initdb.d/init_station_config.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${STATION_CONFIG_DB_USER:-station_config_app} -d ${STATION_CONFIG_DB_NAME:-station_config}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: [mocks, stress]
+
   # Semana 6 (CLAUDE.md §1.1): consumer del dominio Starlink únicamente --
   # Fede todavía no tiene su mock/tópico meteo, así que ese lado del router
   # (ver src/consumer/router.py) queda enrutado pero sin persistencia real.
@@ -90,3 +111,4 @@ volumes:
   mosquitto_data:
   mosquitto_log:
   starlink_db_data:
+  station_config_db_data:
