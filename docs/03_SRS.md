@@ -382,7 +382,7 @@ El desarrollo con mocks permite construir y validar toda la pila de software (br
 
 ### 10.3 Estrategia de Población de Bases de Datos
 
-- Script de backfill: genera 30 días de datos históricos sintéticos e inserta directamente en las hypertables. Permite probar rangos temporales amplios en Grafana desde el inicio.
+- Backfill vía ingesta orgánica end-to-end (ADR-08): los mocks corren con la variable `TIME_WARP_FACTOR` > 1 (ej. 60), publicando al broker a velocidad acelerada; el consumer inserta con el mismo código de producción (ORM, deserialización, validación). Con factor 60 se cargan 30 días de historia en aproximadamente 30 minutos reales. No se usan scripts de INSERT SQL directo a las hypertables — ADR-08 rechaza esa alternativa explícitamente porque no valida el pipeline (ORM, deserialización JSON, consumer).
 
 - Los mocks corren continuamente durante el desarrollo para simular operación en tiempo real.
 
