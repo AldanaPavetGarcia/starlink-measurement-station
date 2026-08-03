@@ -469,12 +469,21 @@ El mock mantiene un estado interno (latencia actual, estado de obstrucción, con
 
 | **Variable** | **Distribución Base** | **Rango Normal** | **Evento de Anomalía** |
 | --- | --- | --- | --- |
-| latency_ms | Normal(35, 5) ms con Random Walk Δ ∈ [-2.5, +3.0] | 20–80 ms | Handover: spike a 150–400 ms con p=0.05 |
-| jitter_ms | Exponential(λ=0.5) | 0–15 ms | Handover: jitter > 50 ms |
-| packet_loss_pct | Bernoulli(p=0.005) × 100 | 0–2 % | Obstrucción: 5–40 %; Caída: 100 % por 2–5 min |
-| throughput_down_mbps | Normal(180, 30) Mbps | 80–300 Mbps | Degradación: < 50 Mbps durante obstrucción |
-| throughput_up_mbps | Normal(22, 5) Mbps | 8–40 Mbps | Idem throughput down, correlacionado |
-| obstruction_pct | Uniforme(0, 3) % en estado normal | 0–3 % | Evento físico: 20–80 % durante obstrucción simulada |
+| latency_ms | Normal(35, 5) ms con Random Walk Δ ∈ [-2.5, +3.0] y reversión suave a la media | 20–80 ms | Handover: spike a 150–400 ms (probabilidad por perfil, ver `CHAOS_PROFILE`) |
+| jitter_ms | Exponential(λ=0.5) | 0–15 ms | Handover: jitter 50–100 ms |
+| packet_loss_pct | Bernoulli(p=0.005) × 100 | 0–2 % | Obstrucción: 5–40 %; Caída (outage multi-tick): 100 % por 2–5 min |
+| throughput_down_bps | Normal(180, 30) Mbps, publicado en bps | 80–300 Mbps | Degradación: 5–50 Mbps durante obstrucción |
+| throughput_up_bps | Normal(22, 5) Mbps, publicado en bps | 8–40 Mbps | Degradación: 1–8 Mbps durante obstrucción, correlacionado con down |
+| snr_db | Normal(9, 3) dB | -20 a 30 dB (clamp) | Degradación: 10–20 dB adicionales durante obstrucción |
+| is_obstructed | Derivado de un estado interno de obstrucción no publicado (`obstruction_pct` uniforme 0–3 % en estado normal) > 10 % | — | TRUE durante evento de obstrucción (3–10 ticks consecutivos, 20–80 % interno) |
+| satellite_count | Normal(15, 3), clamp 0–30 | 10–20 | Cae 3–8 satélites durante obstrucción u handover |
+
+> Tabla corregida al vocabulario del DER/`schema.py` (bps en vez de Mbps,
+> `is_obstructed`/`snr_db` en vez de `obstruction_pct`/`signal_quality`,
+> `satellite_count` agregado) — mismo drift que ya se había corregido en
+> `docs/03_SRS.md` §5.1, extendido acá. Refleja la calibración real de
+> `src/mock_starlink/mock.py` (`CHAOS_PARAMS`), no solo el mecanismo
+> general descrito en la Decisión de este ADR. Ver `docs/PROGRESS.md`.
 
 ### Pros y Contras
 
