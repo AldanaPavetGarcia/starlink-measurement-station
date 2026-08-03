@@ -37,6 +37,56 @@ services:
       TIME_WARP_FACTOR: ${TIME_WARP_FACTOR:-1}
     profiles: [mocks, stress]
 
+  # ADR-10/ADR-11: instancia TimescaleDB propia del dominio Starlink,
+  # independiente de meteo_db (que Fede todavía no levantó). Imagen pinneada
+  # (nunca :latest en producción, ADR-12), verificada con `docker pull`. Sin
+  # `ports`: ADR-14 dice que starlink_health_db NO se expone ni siquiera al
+  # host -- solo el consumer y Grafana, ambos dentro de la red Docker, la
+  # necesitan. Para psql manual usar `docker exec -it starlink-health-db psql ...`.
+  starlink_db:
+    image: timescale/timescaledb:2.17.2-pg16
+    container_name: starlink-health-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${STARLINK_DB_NAME:-starlink_health}
+      POSTGRES_USER: ${STARLINK_DB_USER:-starlink_app}
+      POSTGRES_PASSWORD: ${STARLINK_DB_PASSWORD:-starlink_dev_password}
+    volumes:
+      - starlink_db_data:/var/lib/postgresql/data
+      - ./services/db/init_starlink_health.sql:/docker-entrypoint-initdb.d/init_starlink_health.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${STARLINK_DB_USER:-starlink_app} -d ${STARLINK_DB_NAME:-starlink_health}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    profiles: [mocks, stress]
+
+  # Semana 6 (CLAUDE.md §1.1): consumer del dominio Starlink únicamente --
+  # Fede todavía no tiene su mock/tópico meteo, así que ese lado del router
+  # (ver src/consumer/router.py) queda enrutado pero sin persistencia real.
+  consumer:
+    build:
+      context: .
+      dockerfile: Dockerfile.consumer
+    image: starlink-consumer:dev
+    container_name: starlink-consumer
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      starlink_db:
+        condition: service_healthy
+    environment:
+      MQTT_HOST: broker
+      MQTT_PORT: 1883
+      STARLINK_DB_HOST: starlink_db
+      STARLINK_DB_PORT: 5432
+      STARLINK_DB_NAME: ${STARLINK_DB_NAME:-starlink_health}
+      STARLINK_DB_USER: ${STARLINK_DB_USER:-starlink_app}
+      STARLINK_DB_PASSWORD: ${STARLINK_DB_PASSWORD:-starlink_dev_password}
+    profiles: [mocks, stress]
+
 volumes:
   mosquitto_data:
   mosquitto_log:
+  starlink_db_data:
