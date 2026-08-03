@@ -349,7 +349,6 @@ La taxonomía de tópicos establece el enrutamiento semántico de todos los mens
 | starlink/metrics/<node_id> | Script gRPC Starlink (real o mock) | Consumer Router | starlink_health_db → hypertable network_metrics |
 | meteo/sensor/<node_id> | ESP32 + BME280 (real o mock) | Consumer Router | meteo_db → hypertable env_metrics |
 | meteo/external/<node_id> | Integrador API (Open-Meteo) | Consumer Router | meteo_db → hypertable env_metrics |
-| nodo/lit-01/net_health/iperf_test | Script iPerf3 activo[^c5] | Consumer Router | starlink_health_db → hypertable network_metrics |
 | system/status/<node_id> | Cualquier servicio (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
 
 > Alineado con `docs/03_SRS.md` §5.1 (IF-01, IF-02, IF-03, RF-17), `docs/06_DER.md` y
@@ -362,9 +361,13 @@ La taxonomía de tópicos establece el enrutamiento semántico de todos los mens
 > medición) pero no contradice RF-17, que solo obliga la jerarquía de los tres tópicos
 > de datos.
 >
-> La fila `net_health/iperf_test` queda pendiente de revisión — no está cubierta por el
-> SRS ni por el "Alcance técnico" de `CLAUDE.md` §1.1, y su propósito no está claro (ver
-> comentario [^c5] y `docs/PROGRESS.md`).
+> Se eliminó la fila `nodo/lit-01/net_health/iperf_test` (Script iPerf3 activo): no
+> está cubierta por el SRS ni por el "Alcance técnico" de `CLAUDE.md` §1.1 (telemetría
+> pasiva vía gRPC, sin tests activos), rompía la convención domain-first del resto de
+> la tabla, y de existir en el futuro debería enrutarse a `network_tests`
+> (`docs/06_DER.md` §3.2, pensada justamente para iperf3/speedtest/traceroute), no a
+> `network_metrics`. Queda fuera de alcance del PI actual — ver comentario resuelto
+> [^c5] y `docs/PROGRESS.md`.
 
 ### Pros y Contras de la Arquitectura Políglota
 
@@ -753,7 +756,7 @@ TimescaleDB provee tres mecanismos que se configuran para gestionar el crecimien
 
 El proyecto se desarrolla en las PCs personales de los alumnos (Windows/macOS/Linux) y debe desplegarse en un Raspberry Pi 5 ARM64 en el LIT, y eventualmente en un servidor cloud. [^c13]Sin un mecanismo de empaquetado del entorno de ejecución, el síndrome 'Works on my machine' es un riesgo crítico.
 
-Adicionalmente, la directriz explícita del director exige que la migración de entorno local a nube sea transparente, consistiendo idealmente en solo cambiar variables de entorno (IP del servidor, credenciales[^c14]) sin reescribir código.
+Adicionalmente, la directriz explícita del director exige que la migración de entorno local a nube sea transparente, consistiendo idealmente en solo cambiar variables de entorno (IP del servidor, credenciales) sin reescribir código. En ese sentido, todas las apps del proyecto son **stateless a nivel de infraestructura (12-factor)**: ningún contenedor depende de un volumen local persistente para funcionar — pueden reiniciarse o reprogramarse sin coordinación especial porque el estado que importa (las métricas ya generadas) vive en la base de datos, no en el proceso. Esto no contradice que el mock de Starlink sea "stateful" en el sentido de ADR-06 (mantiene en memoria el último valor de latencia para el random walk): es estado transitorio de generación de datos dentro de un proceso reiniciable, no estado de infraestructura del que dependa la migración local→nube.[^c14]
 
 ### Alternativas Consideradas
 
@@ -970,17 +973,17 @@ Este apéndice consolida las alternativas que fueron evaluadas seriamente pero n
 ### Pendientes
 
 [^c9] ALDANA MICAELA PAVET GARCÍA: Cuanto espacio demanda eso, rever mensajes a probar
-[^c14] SANTIAGO MARTIN HENN: poner algo de que las apps que desarrollan van a ser "stateless"
 [^c13] SANTIAGO MARTIN HENN: parte del mismo
 [^c10] ALDANA MICAELA PAVET GARCÍA: Sacar o explicar bien
 [^c7] ALDANA MICAELA PAVET GARCÍA: Mock para validar funcionamiento antes de conectar
 [^c8] ALDANA MICAELA PAVET GARCÍA: No es necesario por objetivo
 [^c12] SANTIAGO MARTIN HENN: No?
-[^c5] ALDANA MICAELA PAVET GARCÍA: No queda claro, para qué? (ver `docs/PROGRESS.md`, fila `net_health/iperf_test` de ADR-04)
 [^c11] ALDANA MICAELA PAVET GARCÍA: 200 que?
 
 ### Resueltos
 
+[^c14] SANTIAGO MARTIN HENN: poner algo de que las apps que desarrollan van a ser "stateless" — resuelto: aclarado en el Contexto de ADR-12 que es "stateless" a nivel de infraestructura (12-factor, sin volúmenes locales persistentes), lo cual no contradice que el mock de Starlink sea "stateful" a nivel de lógica de generación de datos en memoria (ADR-06).
+[^c5] ALDANA MICAELA PAVET GARCÍA: No queda claro, para qué? (ver `docs/PROGRESS.md`, fila `net_health/iperf_test` de ADR-04) — resuelto: fuera del "Alcance técnico" de `CLAUDE.md` §1.1 (solo telemetría pasiva vía gRPC); la fila se eliminó de la tabla de tópicos de ADR-04. De agregarse iPerf3 activo en el futuro, correspondería a `network_tests` (DER §3.2), no a `network_metrics`.
 [^c6] ALDANA MICAELA PAVET GARCÍA: Paradigma de programación — resuelto: título de ADR-05 renombrado a "Selección de Lenguajes y Paradigma de Programación".
 [^c2] ALDANA MICAELA PAVET GARCÍA: Explicar que se elige porque viene integrado con interfaces — resuelto: agregado a la Decisión de ADR-02.
 [^c1] ALDANA MICAELA PAVET GARCÍA: Anticorrupción, acl — resuelto: agregado párrafo de framing ACL (Anti-Corruption Layer) en la Justificación de ADR-01.
