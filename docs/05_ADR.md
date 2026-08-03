@@ -123,6 +123,30 @@ Usar el wrapper Protobuf de la antena como entrada, convertir a diccionario Pyth
 
 Se extrae el dato en Protobuf nativo de la antena usando starlink-grpc-tools. Inmediatamente se convierte a dict Python. Pydantic valida el esquema (tipos, rangos, campos requeridos) antes de que el dato toque cualquier sistema downstream. La salida es JSON para MQTT, PostgreSQL y todos los componentes internos.
 
+### Estructura concreta del payload: envelope + `metrics` anidado
+
+El JSON del paquete Starlink tiene dos niveles, no es una tabla plana de campos al mismo nivel: un envelope con metadatos de identificación (`schema_version`, `node_id`, `timestamp`) y un objeto anidado `metrics` con las métricas de red (`latency_ms`, `jitter_ms`, `packet_loss_pct`, `throughput_down_bps`, `throughput_up_bps`, `snr_db`, `is_obstructed`, `satellite_count`):
+
+```json
+{
+  "schema_version": "1.0",
+  "node_id": "lit-cordoba-01",
+  "timestamp": "2026-06-01T14:30:00Z",
+  "metrics": {
+    "latency_ms": 35.4,
+    "jitter_ms": 4.2,
+    "packet_loss_pct": 0.5,
+    "throughput_down_bps": 187300000,
+    "throughput_up_bps": 22100000,
+    "snr_db": 9.0,
+    "is_obstructed": false,
+    "satellite_count": 14
+  }
+}
+```
+
+Motivo: separa el ciclo de vida del envelope (identidad del paquete, rara vez cambia) del ciclo de vida de `metrics` (sí puede evolucionar — nuevos campos de telemetría con futuros firmwares de la antena) sin acoplar la validación de uno al otro. Ya implementado así en `src/mock_starlink/schema.py` (`StarlinkPayloadIn.metrics: StarlinkMetrics`) y verificado end-to-end contra un broker real (`docker compose --profile mocks up`, semana 4-5). Esta estructura gobierna el paquete MQTT y el body de `POST /ingest/starlink` — no aplica a las filas de `network_metrics` ni a la salida de los GET de la API REST, que son planas por naturaleza (columnas SQL).
+
 ### Justificación — Rechazo de Alternativas
 
 **Rechazo de Alternativa A (JSON Puro):** el JSON no validado permite que errores de tipo (ej. un string '15ms' donde se espera float 15.0) lleguen silenciosamente a la base de datos, corrompiendo las series temporales. La pérdida de datos silenciosa es inaceptable en un proyecto de medición científica. Pydantic resuelve esto sin los costos operativos de Protobuf.

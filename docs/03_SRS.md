@@ -105,18 +105,58 @@ Todos los mensajes intercambiados entre componentes utilizan JSON como formato d
 
 Publicado en el tópico MQTT: starlink/metrics/<node_id>
 
+El paquete tiene dos niveles: un **envelope** con metadatos de identificación y un
+objeto anidado **`metrics`** con las métricas de red propiamente dichas (ADR-01,
+"Estructura concreta del payload"). No es una tabla plana de campos al mismo nivel.
+
+**Envelope:**
+
 | **Campo** | **Tipo** | **Descripción** | **Ejemplo** |
 | --- | --- | --- | --- |
-| timestamp | string (ISO 8601) | Instante UTC de la medición | "2026-06-01T14:30:00Z" |
-| node_id | string | Identificador único del nodo | "lit-cordoba-01" |
-| latency_ms | float | RTT promedio al servidor de referencia (ms) | 35.4 |
-| jitter_ms | float | Variación del RTT (ms) | 4.2 |
-| packet_loss_pct | float | Porcentaje de paquetes perdidos (0–100) | 0.5 |
-| throughput_down_mbps | float | Velocidad de bajada medida (Mbps) | 187.3 |
-| throughput_up_mbps | float | Velocidad de subida medida (Mbps) | 22.1 |
-| obstruction_pct | float / null | Porcentaje de obstrucción del FOV (si disponible) | 1.2 |
-| signal_quality | float / null | Calidad de señal reportada (0–1) | 0.95 |
 | schema_version | string | Versión del esquema de paquete | "1.0" |
+| node_id | string | Identificador único del nodo | "lit-cordoba-01" |
+| timestamp | string (ISO 8601) | Instante UTC de la medición | "2026-06-01T14:30:00Z" |
+
+**`metrics` (objeto anidado):**
+
+| **Campo** | **Tipo** | **Descripción** | **Ejemplo** |
+| --- | --- | --- | --- |
+| latency_ms | float / null | RTT promedio al servidor de referencia (ms) | 35.4 |
+| jitter_ms | float / null | Variación del RTT (ms) | 4.2 |
+| packet_loss_pct | float / null | Porcentaje de paquetes perdidos (0–100) | 0.5 |
+| throughput_down_bps | integer / null | Velocidad de bajada medida (bits por segundo) | 187300000 |
+| throughput_up_bps | integer / null | Velocidad de subida medida (bits por segundo) | 22100000 |
+| snr_db | float / null | Signal-to-Noise Ratio reportado por la API interna de la terminal (si disponible) | 9.0 |
+| is_obstructed | boolean / null | Obstrucción del campo visual (FOV) reportada por la API interna (si disponible) | false |
+| satellite_count | integer / null | Cantidad de satélites en vista (si disponible) | 14 |
+
+Ejemplo de paquete completo:
+
+```json
+{
+  "schema_version": "1.0",
+  "node_id": "lit-cordoba-01",
+  "timestamp": "2026-06-01T14:30:00Z",
+  "metrics": {
+    "latency_ms": 35.4,
+    "jitter_ms": 4.2,
+    "packet_loss_pct": 0.5,
+    "throughput_down_bps": 187300000,
+    "throughput_up_bps": 22100000,
+    "snr_db": 9.0,
+    "is_obstructed": false,
+    "satellite_count": 14
+  }
+}
+```
+
+> Corregido para coincidir con `docs/06_DER.md` (`network_metrics`) y con
+> `src/mock_starlink/schema.py`, que ya seguían este vocabulario/unidades
+> (bps en vez de Mbps, `is_obstructed`/`snr_db` en vez de
+> `obstruction_pct`/`signal_quality`, `satellite_count` agregado). La
+> estructura de envelope + `metrics` anidado también refleja la
+> implementación real (antes esta sección mostraba una tabla plana) — ver
+> ADR-01 y `docs/PROGRESS.md`.
 
 ### 5.2 Paquete de Datos Ambientales (Sensor Local)
 
@@ -178,7 +218,7 @@ Los requerimientos se clasifican por subsistema y se les asigna prioridad: **Alt
 | --- | --- | --- |
 | **RF-01** | El script de telemetría DEBE ejecutarse periódicamente (período configurable, por defecto 60 s) mediante un mecanismo de orquestación temporal (cron, scheduler Python o equivalente). | Alta |
 | **RF-02** | El script DEBE medir latencia (RTT), jitter, pérdida de paquetes, throughput de bajada y subida utilizando herramientas de red estándar (ping, iperf3, speedtest-cli o equivalentes). | Alta |
-| **RF-03** | El script DEBE incorporar, cuando esté disponible, métricas adicionales provistas por la API local de diagnóstico de la terminal Starlink (obstruction_pct, signal_quality). | Media |
+| **RF-03** | El script DEBE incorporar, cuando esté disponible, métricas adicionales provistas por la API local de diagnóstico de la terminal Starlink (`is_obstructed`, `snr_db`, `satellite_count`). | Media |
 | **RF-04** | El script DEBE publicar los resultados empaquetados en formato JSON (ver §5.1) en el broker MQTT en el tópico correspondiente. | Alta |
 | **RF-05** | DEBE existir un Mock del script de telemetría que genere datos sintéticos plausibles (distribuciones estadísticas configurables) y publique en los mismos tópicos con la misma morfología. | Alta |
 
