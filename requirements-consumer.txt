@@ -1,0 +1,10 @@
+# Dependencias del consumer (services/consumer -> Dockerfile.consumer).
+# Extiende requirements.txt (paho-mqtt, pydantic, pytest) en vez de duplicarlo:
+# el consumer reusa StarlinkPayloadIn de mock_starlink/schema.py (ADR-01) para
+# no duplicar la validación y evitar el drift de vocabulario documentado en
+# docs/PROGRESS.md.
+-r requirements.txt
+
+# ADR-04: consumer -> DB vía ORM SQLAlchemy sobre TCP/IP nativo de PostgreSQL.
+sqlalchemy>=2.0,<3
+psycopg2-binary>=2.9,<3

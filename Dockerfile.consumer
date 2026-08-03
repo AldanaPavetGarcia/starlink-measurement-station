@@ -1,0 +1,19 @@
+# Microservicio Docker independiente del consumer (ADR-07). Reusa
+# python:3.11-slim, multi-arch (amd64/arm64), igual que el mock (ADR-05,
+# ADR-12). Copia src/mock_starlink además de src/consumer porque el consumer
+# valida los paquetes con el mismo StarlinkPayloadIn que publica el mock
+# (ADR-01) -- no se duplica el esquema.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt requirements-consumer.txt ./
+RUN pip install --no-cache-dir -r requirements-consumer.txt
+
+COPY src/mock_starlink ./src/mock_starlink
+COPY src/consumer ./src/consumer
+
+ENV PYTHONPATH=/app/src
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "consumer"]
