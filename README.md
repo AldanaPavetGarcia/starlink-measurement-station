@@ -6,8 +6,8 @@ Módulo de adquisición de telemetría de red Starlink (latencia, jitter, throug
 En desarrollo. Semanas 1 a 12 cerradas del lado individual de Aldana (ver
 `docs/PROGRESS.md` para el detalle y lo pendiente de coordinar con Fede). Pipeline
 completo corriendo end-to-end con mocks (perfil `mocks`) o contra hardware real
-(perfil `real`, semana 10 — código escrito, todavía sin validar contra la antena
-física):
+(perfil `real`, semana 10 — mapeo validado contra la antena real el 12/08/2026,
+todavía sin correr como pila Docker completa en la RPi5, ver §Extractor real):
 
 ```
 mock_starlink (Random Walk + caos)  ─┐
@@ -33,17 +33,26 @@ mock_starlink (Random Walk + caos)  ─┐
 - Backend API REST (FastAPI, semana 9): `GET /health`, `GET /metrics/starlink*`,
   `GET /nodes*`, `POST /ingest/starlink` (testing/backfill). Auth por `X-API-Key`.
 - Extractor real (semana 10): reemplaza al mock contra la antena física vía `grpcurl`
-  (server reflection) — mismo tópico/morfología de paquete, sin validar contra
-  hardware todavía (sin acceso presencial al LIT en la última sesión).
+  (server reflection) — mismo tópico/morfología de paquete. Mapeo validado
+  campo a campo contra la antena real el 12/08/2026 (ver `docs/PROGRESS.md`);
+  falta correrlo como servicio Docker continuo en la RPi5 (Docker Engine
+  todavía no instalado ahí) y las 72h de CA-01/CA-02.
 - Dashboard Grafana "Red Starlink" provisionado como código (ADR-13): latencia/jitter,
   packet loss, throughput, satélites/obstrucción/SNR bajo, handovers por hora,
   alineación de la antena, histograma de latencia.
-- Suite de tests (177 pasando, ~95% de cobertura sobre el código unit-testeable — ver
+- Suite de tests (183 pasando, ~95% de cobertura sobre el código unit-testeable — ver
   `.coveragerc`), suite de integración IT-01 automatizada (`tests/integration/`, corre
   contra Docker real), CI en GitHub Actions (`.github/workflows/`). Skill de control de
   consistencia ADR/DER/SRS/API (`adr-check`) activa.
 
 ## Levantar todo el stack
+
+**¿Dónde corre esto?** El perfil `mocks` es para desarrollo/testing — corre en
+cualquier máquina (tu laptop, para probar en casa sin hardware). El perfil `real`
+es el despliegue de producción y **corre entero en la RPi5 del LIT** — no solo
+`acquisition`, sino toda la pila (broker, DBs, backend, Grafana) en la misma
+máquina, para no depender de que tu laptop esté prendida durante las 72h de
+CA-01/CA-02 (ver `CLAUDE.md` §6, plan de migración Local → Nube).
 
 ```bash
 cp .env.example .env   # los defaults ya sirven para desarrollo local
@@ -53,11 +62,11 @@ docker compose --profile mocks up --build
 Perfiles disponibles (`docker-compose.yml`) — sin uno de estos, `docker compose up`
 solo levanta el broker:
 
-| Perfil | Para qué | Servicios |
-|---|---|---|
-| `mocks` | Desarrollo local, sin hardware | broker, `mock_starlink`, `consumer`, `starlink_db`, `station_config_db`, `backend`, `grafana` |
-| `real` | Hardware real (RPi5 + antena en `192.168.100.1:9200`) | `acquisition` en vez de `mock_starlink` — **nunca junto con `mocks`**, dos productores del mismo tópico rompería ADR-01 |
-| `stress` | Pruebas de carga (semana 21) | mismo set que `mocks`, pensado para correr con `TIME_WARP_FACTOR` alto |
+| Perfil | Para qué | Dónde corre | Servicios |
+|---|---|---|---|
+| `mocks` | Desarrollo local, sin hardware | Cualquier máquina (tu laptop) | broker, `mock_starlink`, `consumer`, `starlink_db`, `station_config_db`, `backend`, `grafana` |
+| `real` | Producción con hardware real | **Solo la RPi5 del LIT** (única con ruta a `192.168.100.1:9200`) | `acquisition` en vez de `mock_starlink`, **más** el resto del stack de `mocks` (broker/DBs/backend/grafana) levantado ahí mismo — **nunca junto con** el contenedor `mock_starlink`, dos productores del mismo tópico rompería ADR-01 |
+| `stress` | Pruebas de carga (semana 21) | Cualquier máquina | mismo set que `mocks`, pensado para correr con `TIME_WARP_FACTOR` alto |
 
 - **Grafana**: [http://localhost:3000](http://localhost:3000) — usuario/contraseña por
   defecto `admin` / `grafana_dev_password` (`.env`). El dashboard "Red Starlink" ya
@@ -175,13 +184,19 @@ Reemplaza a `mock_starlink` contra la antena física (`192.168.100.1:9200`) — 
 tópico MQTT y misma morfología de paquete (ADR-01), el consumer/DB/Grafana no notan
 el cambio. Usa `grpcurl` (server reflection) en vez de bindings `grpcio` compilados —
 ver la enmienda de ADR-01 en `docs/05_ADR.md`. Corre bajo el perfil `real`,
-**nunca junto con `mocks`**.
+**solo en la RPi5** (única máquina con ruta a la antena), **nunca junto con** el
+contenedor `mock_starlink` del perfil `mocks`.
 
-⚠️ Escrito y con tests unitarios sobre la lógica de mapeo (`tests/test_acquisition.py`,
-JSON sintético), pero **sin validar contra la antena real todavía** — pendiente de la
-próxima visita presencial al LIT (ver `docs/PROGRESS.md` §Semana 10 para el checklist).
+✅ Mapeo (`starlink_extractor.py`) validado el 12/08/2026 contra un payload real
+capturado de la antena (`grpcurl` vía SSH a la RPi5) — encontró y corrigió 3
+mismatches con lo asumido en ADR-16/17/18 (`snr_low`, `is_obstructed`, rango de
+`boresight_azimuth_deg`), ver `docs/PROGRESS.md` §Semana 10 para el detalle.
+⚠️ Todavía **no corrido como servicio Docker continuo en la RPi5** (Docker Engine
+no está instalado ahí) ni las 72h de CA-01/CA-02.
 
 ```bash
+# en la RPi5, con el resto del stack ya levantado (docker compose --profile mocks
+# up -d broker starlink_db station_config_db backend grafana) y sin mock_starlink corriendo:
 docker compose --profile real up --build acquisition
 ```
 
