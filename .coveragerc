@@ -1,0 +1,13 @@
+[run]
+source = src
+
+# */__main__.py excluidos del umbral a propósito: son loops de conexión MQTT
+# (mock_starlink/consumer/acquisition), casi sin lógica propia -- toda la
+# lógica real (validación, mapeo, router, extractor) vive en módulos
+# hermanos que SÍ están al 100%/cerca de eso. Mockear todo el stack de
+# paho-mqtt para subir este número no agrega confianza real; estos loops se
+# validan con `docker compose --profile mocks up --build` (ver
+# docs/PROGRESS.md, ya documentado así desde antes de que existiera este
+# archivo -- ver también docstring de tests/test_main.py).
+omit =
+    */__main__.py
