@@ -1,0 +1,8 @@
+# Dependencias del extractor real (src/acquisition -> Dockerfile.acquisition).
+# Extiende requirements.txt (pydantic, paho-mqtt) -- reusa StarlinkPayloadIn de
+# mock_starlink/schema.py (ADR-01) para no duplicar la validación.
+-r requirements.txt
+
+# Sin dependencias pip adicionales: la extracción usa el binario `grpcurl`
+# (instalado en Dockerfile.acquisition, no es un paquete Python) -- ver
+# enmienda de ADR-01 en docs/05_ADR.md.
