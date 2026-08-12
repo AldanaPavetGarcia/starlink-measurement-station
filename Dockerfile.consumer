@@ -10,6 +10,7 @@ WORKDIR /app
 COPY requirements.txt requirements-consumer.txt ./
 RUN pip install --no-cache-dir -r requirements-consumer.txt
 
+COPY src/common ./src/common
 COPY src/mock_starlink ./src/mock_starlink
 COPY src/consumer ./src/consumer
 

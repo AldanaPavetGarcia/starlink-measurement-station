@@ -1,0 +1,32 @@
+# Microservicio Docker independiente del extractor real (ADR-07). Reusa
+# python:3.11-slim, multi-arch (amd64/arm64) -- corre igual en la PC de
+# desarrollo y en el RPi5 real (ADR-05, ADR-12). A diferencia de
+# Dockerfile/Dockerfile.consumer, agrega el binario `grpcurl` (no es un
+# paquete pip, ver enmienda de ADR-01 en docs/05_ADR.md).
+FROM python:3.11-slim
+
+# grpcurl: se instala el binario pinneado desde GitHub Releases (no está en
+# los repos apt de Debian slim). Detecta arch en build time para funcionar
+# igual en amd64 (desarrollo) y arm64 (RPi5, semana 10).
+ARG GRPCURL_VERSION=1.9.1
+RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates \
+    && ARCH=$(dpkg --print-architecture) \
+    && curl -fsSL -o /tmp/grpcurl.tar.gz \
+       "https://github.com/fullstorydev/grpcurl/releases/download/v${GRPCURL_VERSION}/grpcurl_${GRPCURL_VERSION}_linux_${ARCH}.tar.gz" \
+    && tar -xzf /tmp/grpcurl.tar.gz -C /usr/local/bin grpcurl \
+    && rm /tmp/grpcurl.tar.gz \
+    && apt-get purge -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements.txt requirements-acquisition.txt ./
+RUN pip install --no-cache-dir -r requirements-acquisition.txt
+
+COPY src/common ./src/common
+COPY src/mock_starlink ./src/mock_starlink
+COPY src/acquisition ./src/acquisition
+
+ENV PYTHONPATH=/app/src
+ENV PYTHONUNBUFFERED=1
+
+CMD ["python", "-m", "acquisition"]

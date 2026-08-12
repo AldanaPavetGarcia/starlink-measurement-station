@@ -3,7 +3,7 @@ Esquema y validador Pydantic del paquete de telemetría Starlink (ADR-01).
 
 Corresponde a la definición final documentada en el informe de relevamiento:
 - schema_version, node_id, timestamp como metadatos.
-- metrics como objeto anidado con las 8 métricas de red.
+- metrics como objeto anidado con las métricas de red.
 - packet_loss_pct y jitter_ms se calculan en el extractor (no son campos
   nativos del gRPC), pero acá solo se valida el paquete ya construido.
 - Todos los campos de métricas salvo node_id/timestamp/schema_version son
@@ -16,6 +16,25 @@ Corresponde a la definición final documentada en el informe de relevamiento:
   referenciado por ningún requerimiento del SRS.
 - No existe campo `source` (mock/real): decisión de alcance, el mock es
   solo una herramienta de desarrollo que no convive con datos reales.
+
+schema_version 1.1 (ADR-16/17/18, agosto 2026, relevamiento contra hardware
+real en el LIT):
+- `snr_db` (float) reemplazado por `snr_low` (bool, ADR-17) — el firmware
+  real (apiVersion 42) no expone SNR numérico, solo `isSnrAboveNoiseFloor`
+  (confirmado en campo el 12/08/2026; `isSnrPersistentlyLow`, asumido en el
+  relevamiento del 04/08, no existe). `snr_low = not isSnrAboveNoiseFloor`.
+  Cambio de tipo incompatible con 1.0, por eso `check_schema_version`
+  rechaza explícitamente la versión vieja.
+- `handover_count`/`outage_duration_ms` agregados (ADR-16), derivados de
+  `get_history.dishGetHistory.outages[].didSwitch` real.
+- Campos de `alignmentStats` agregados (ADR-18, pedido del director):
+  `tilt_angle_deg`, `boresight_azimuth_deg`, `boresight_elevation_deg`,
+  `desired_boresight_azimuth_deg`, `desired_boresight_elevation_deg`,
+  `attitude_uncertainty_deg`. Los dos campos de azimuth usan rango firmado
+  (-180..180, no brújula 0-360) — corregido el 12/08/2026 tras confirmar
+  contra la antena real que el firmware devuelve valores como -179.99922;
+  la convención 0-360 asumida originalmente en ADR-18 nunca se validó
+  contra hardware y quedaba falsa en la práctica.
 """
 
 from datetime import datetime, timezone
@@ -23,7 +42,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
 
 
 class StarlinkMetrics(BaseModel):
@@ -55,25 +74,78 @@ class StarlinkMetrics(BaseModel):
         description="uplink_throughput_bps, sin convertir (bps, no Mbps). "
                     "Null si la medición falló (DER NULL='S')."
     )
-    snr_db: Optional[float] = Field(
-        default=None, ge=-20, le=30,
-        description="snr del get_status. Rango amplio para tolerar condiciones "
-                    "de señal muy pobre sin rechazar el paquete. Null si la API "
-                    "interna de la antena no está accesible (DER NULL='S')."
+    snr_low: Optional[bool] = Field(
+        default=None,
+        description="`not isSnrAboveNoiseFloor` del get_status real (ADR-17). "
+                    "Reemplaza snr_db (float) desde schema_version 1.1 -- el "
+                    "firmware real no expone SNR numérico. Null si la API interna "
+                    "de la antena no está accesible (DER NULL='S')."
     )
     is_obstructed: Optional[bool] = Field(
         default=None,
-        description="Basado en currently_obstructed. obstruction_detail se "
-                    "descartó por estar deprecado en firmwares recientes. Null si "
-                    "la API interna de la antena no está accesible (DER NULL='S')."
+        description="`obstructionStats.fractionObstructed > 0` del get_status real "
+                    "-- el firmware no expone un booleano currently_obstructed "
+                    "(confirmado 12/08/2026), solo la fracción continua de "
+                    "muestras recientes obstruidas. Null si la API interna de la "
+                    "antena no está accesible (DER NULL='S')."
     )
     satellite_count: Optional[int] = Field(
         default=None, ge=0,
         description="Opcional: no confiable en todo el hardware ni referenciado "
                     "en el SRS. No bloquea el paquete si falta (DER NULL='S')."
     )
+    handover_count: Optional[int] = Field(
+        default=None, ge=0,
+        description="Cantidad de eventos de handover (didSwitch=true) desde la "
+                    "medición anterior (ADR-16). 0 es el valor normal; null solo "
+                    "si la medición falló (get_history no accesible)."
+    )
+    outage_duration_ms: Optional[float] = Field(
+        default=None, ge=0,
+        description="Milisegundos totales de corte asociados a handover_count, "
+                    "en el mismo intervalo (ADR-16). 0.0 es el valor normal; null "
+                    "solo si la medición falló."
+    )
+    tilt_angle_deg: Optional[float] = Field(
+        default=None, ge=0, le=90,
+        description="alignmentStats.tiltAngleDeg (ADR-18). Null si no disponible."
+    )
+    boresight_azimuth_deg: Optional[float] = Field(
+        default=None, ge=-180, le=180,
+        description="alignmentStats.boresightAzimuthDeg, apuntamiento real (ADR-18). "
+                    "Rango firmado (-180..180), confirmado contra la antena real el "
+                    "12/08/2026 -- la convención de brújula 0-360 asumida originalmente "
+                    "nunca se validó contra hardware y era incorrecta. Null si no "
+                    "disponible."
+    )
+    boresight_elevation_deg: Optional[float] = Field(
+        default=None, ge=0, le=90,
+        description="alignmentStats.boresightElevationDeg, apuntamiento real "
+                    "(ADR-18). Null si no disponible."
+    )
+    desired_boresight_azimuth_deg: Optional[float] = Field(
+        default=None, ge=-180, le=180,
+        description="alignmentStats.desiredBoresightAzimuthDeg, apuntamiento "
+                    "objetivo (ADR-18). Rango firmado (-180..180), ver "
+                    "boresight_azimuth_deg. Null si no disponible."
+    )
+    desired_boresight_elevation_deg: Optional[float] = Field(
+        default=None, ge=0, le=90,
+        description="alignmentStats.desiredBoresightElevationDeg, apuntamiento "
+                    "objetivo (ADR-18). Null si no disponible."
+    )
+    attitude_uncertainty_deg: Optional[float] = Field(
+        default=None, ge=0,
+        description="alignmentStats.attitudeUncertaintyDeg (ADR-18). Null si no "
+                    "disponible."
+    )
 
-    @field_validator("latency_ms", "jitter_ms", "throughput_down_bps", "throughput_up_bps")
+    @field_validator(
+        "latency_ms", "jitter_ms", "throughput_down_bps", "throughput_up_bps",
+        "outage_duration_ms", "tilt_angle_deg", "boresight_azimuth_deg",
+        "boresight_elevation_deg", "desired_boresight_azimuth_deg",
+        "desired_boresight_elevation_deg", "attitude_uncertainty_deg",
+    )
     @classmethod
     def reject_nan_inf(cls, v: float) -> float:
         """Rechaza NaN/Infinity, que json.dumps no serializa bien y romperían
@@ -86,7 +158,7 @@ class StarlinkMetrics(BaseModel):
 class StarlinkPayloadIn(BaseModel):
     """Paquete completo tal como se publica en el tópico MQTT de Starlink."""
 
-    schema_version: str = Field(..., description="Versión del esquema, ej. '1.0'.")
+    schema_version: str = Field(..., description="Versión del esquema, ej. '1.1'.")
     node_id: str = Field(
         ..., min_length=1, max_length=64,
         pattern=r"^[a-z0-9][a-z0-9\-]*[a-z0-9]$",
@@ -126,7 +198,7 @@ class StarlinkPayloadIn(BaseModel):
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":  # pragma: no cover
     ejemplo_valido = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "node_id": "lit-cordoba-01",
         "timestamp": "2026-07-05T14:32:10.123+00:00",
         "metrics": {
@@ -135,9 +207,17 @@ if __name__ == "__main__":  # pragma: no cover
             "packet_loss_pct": 0.8,
             "throughput_down_bps": 185340000,
             "throughput_up_bps": 12450000,
-            "snr_db": 9.2,
+            "snr_low": False,
             "is_obstructed": False,
             "satellite_count": 14,
+            "handover_count": 0,
+            "outage_duration_ms": 0.0,
+            "tilt_angle_deg": 2.1,
+            "boresight_azimuth_deg": -175.7,
+            "boresight_elevation_deg": 51.7,
+            "desired_boresight_azimuth_deg": -176.0,
+            "desired_boresight_elevation_deg": 52.0,
+            "attitude_uncertainty_deg": 0.3,
         },
     }
 

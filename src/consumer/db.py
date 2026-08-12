@@ -48,9 +48,17 @@ class NetworkMetric(Base):
     packet_loss_pct: Mapped[Optional[float]] = mapped_column(Float)
     throughput_down_bps: Mapped[Optional[int]] = mapped_column(BigInteger)
     throughput_up_bps: Mapped[Optional[int]] = mapped_column(BigInteger)
-    snr_db: Mapped[Optional[float]] = mapped_column(Float)
+    snr_low: Mapped[Optional[bool]] = mapped_column(Boolean)
     is_obstructed: Mapped[Optional[bool]] = mapped_column(Boolean)
     satellite_count: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    handover_count: Mapped[Optional[int]] = mapped_column(SmallInteger)
+    outage_duration_ms: Mapped[Optional[float]] = mapped_column(Float)
+    tilt_angle_deg: Mapped[Optional[float]] = mapped_column(Float)
+    boresight_azimuth_deg: Mapped[Optional[float]] = mapped_column(Float)
+    boresight_elevation_deg: Mapped[Optional[float]] = mapped_column(Float)
+    desired_boresight_azimuth_deg: Mapped[Optional[float]] = mapped_column(Float)
+    desired_boresight_elevation_deg: Mapped[Optional[float]] = mapped_column(Float)
+    attitude_uncertainty_deg: Mapped[Optional[float]] = mapped_column(Float)
     schema_version: Mapped[str] = mapped_column(String(16))
 
 

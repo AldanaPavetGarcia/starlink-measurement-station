@@ -1,0 +1,5 @@
+# Dependencia de tests/stress/locustfile.py (semana 21, docs/08_Plan_QA.md §6.5).
+# Separado de requirements.txt/requirements-backend.txt a propósito -- Locust
+# no corre dentro de ningún contenedor de producción, es una herramienta de
+# testing que se instala aparte en la máquina que dispara la carga.
+locust>=2.31,<3

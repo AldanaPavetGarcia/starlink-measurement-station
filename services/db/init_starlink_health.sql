@@ -9,30 +9,61 @@
 -- DER no la declaraba pese a que la convención documentada en §"Convenciones"
 -- la exige (PK compuesta, time primero por el particionado de TimescaleDB) y a
 -- que RF-18/QoS 1 implica reentregas -> sin PK no hay forma de deduplicar.
+--
+-- schema_version 1.1 (ADR-16/17/18, agosto 2026): snr_db (float) reemplazado
+-- por snr_low (bool, ADR-17) -- el firmware real no expone SNR numérico.
+-- Agregadas handover_count/outage_duration_ms (ADR-16) y las columnas de
+-- alignmentStats (ADR-18). Agregar columnas a una hypertable existente es
+-- seguro (no requiere migración destructiva) -- en Etapa 0 (datos sintéticos)
+-- se recrea el volumen en vez de hacer ALTER TABLE, ver docs/PROGRESS.md.
 -- ============================================================
 
 CREATE EXTENSION IF NOT EXISTS timescaledb;
 
 -- ── Tabla base de telemetría de red ──────────────────────────
 CREATE TABLE IF NOT EXISTS network_metrics (
-    time                 TIMESTAMPTZ        NOT NULL,
-    node_id              VARCHAR(64)        NOT NULL,
-    latency_ms           FLOAT8,
-    jitter_ms            FLOAT8,
-    packet_loss_pct      FLOAT8,
-    throughput_down_bps  BIGINT,
-    throughput_up_bps    BIGINT,
-    snr_db               FLOAT8,
-    is_obstructed        BOOLEAN,
-    satellite_count      SMALLINT,
-    schema_version       VARCHAR(16)        NOT NULL DEFAULT '1.0',
+    time                              TIMESTAMPTZ        NOT NULL,
+    node_id                           VARCHAR(64)        NOT NULL,
+    latency_ms                        FLOAT8,
+    jitter_ms                         FLOAT8,
+    packet_loss_pct                   FLOAT8,
+    throughput_down_bps               BIGINT,
+    throughput_up_bps                 BIGINT,
+    snr_low                           BOOLEAN,
+    is_obstructed                     BOOLEAN,
+    satellite_count                   SMALLINT,
+    handover_count                    SMALLINT,
+    outage_duration_ms                FLOAT8,
+    tilt_angle_deg                    FLOAT8,
+    boresight_azimuth_deg             FLOAT8,
+    boresight_elevation_deg           FLOAT8,
+    desired_boresight_azimuth_deg     FLOAT8,
+    desired_boresight_elevation_deg   FLOAT8,
+    attitude_uncertainty_deg          FLOAT8,
+    schema_version                    VARCHAR(16)        NOT NULL DEFAULT '1.1',
     PRIMARY KEY (time, node_id),
     CONSTRAINT chk_netmet_loss
         CHECK (packet_loss_pct IS NULL OR (packet_loss_pct >= 0 AND packet_loss_pct <= 100)),
     CONSTRAINT chk_netmet_down
         CHECK (throughput_down_bps IS NULL OR throughput_down_bps >= 0),
     CONSTRAINT chk_netmet_up
-        CHECK (throughput_up_bps IS NULL OR throughput_up_bps >= 0)
+        CHECK (throughput_up_bps IS NULL OR throughput_up_bps >= 0),
+    CONSTRAINT chk_netmet_handover_count
+        CHECK (handover_count IS NULL OR handover_count >= 0),
+    CONSTRAINT chk_netmet_outage_duration
+        CHECK (outage_duration_ms IS NULL OR outage_duration_ms >= 0),
+    CONSTRAINT chk_netmet_tilt
+        CHECK (tilt_angle_deg IS NULL OR (tilt_angle_deg >= 0 AND tilt_angle_deg <= 90)),
+    CONSTRAINT chk_netmet_boresight_azimuth
+        CHECK (boresight_azimuth_deg IS NULL OR (boresight_azimuth_deg >= -180 AND boresight_azimuth_deg <= 180)),
+    CONSTRAINT chk_netmet_boresight_elevation
+        CHECK (boresight_elevation_deg IS NULL OR (boresight_elevation_deg >= 0 AND boresight_elevation_deg <= 90)),
+    CONSTRAINT chk_netmet_desired_azimuth
+        CHECK (desired_boresight_azimuth_deg IS NULL OR (desired_boresight_azimuth_deg >= -180 AND desired_boresight_azimuth_deg <= 180)),
+    CONSTRAINT chk_netmet_desired_elevation
+        CHECK (desired_boresight_elevation_deg IS NULL OR (desired_boresight_elevation_deg >= 0 AND desired_boresight_elevation_deg <= 90)),
+    CONSTRAINT chk_netmet_attitude_uncertainty
+        CHECK (attitude_uncertainty_deg IS NULL OR attitude_uncertainty_deg >= 0)
 );
 
 SELECT create_hypertable('network_metrics', 'time',
@@ -97,6 +128,9 @@ SELECT
     AVG(packet_loss_pct)                                       AS avg_packet_loss_pct,
     AVG(throughput_down_bps)                                   AS avg_throughput_down_bps,
     AVG(throughput_up_bps)                                     AS avg_throughput_up_bps,
+    SUM(handover_count)                                        AS sum_handover_count,
+    SUM(outage_duration_ms)                                    AS sum_outage_duration_ms,
+    AVG(tilt_angle_deg)                                        AS avg_tilt_angle_deg,
     COUNT(*)                                                   AS sample_count
 FROM network_metrics
 GROUP BY bucket, node_id
@@ -120,6 +154,9 @@ SELECT
     100.0 * SUM(CASE WHEN packet_loss_pct < 5 THEN 1 ELSE 0 END)::float / COUNT(*) AS availability_pct,
     AVG(throughput_down_bps)                                   AS avg_throughput_down_bps,
     AVG(throughput_up_bps)                                     AS avg_throughput_up_bps,
+    SUM(handover_count)                                        AS sum_handover_count,
+    SUM(outage_duration_ms)                                    AS sum_outage_duration_ms,
+    AVG(tilt_angle_deg)                                        AS avg_tilt_angle_deg,
     COUNT(*)                                                   AS sample_count
 FROM network_metrics
 GROUP BY bucket, node_id

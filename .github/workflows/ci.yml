@@ -1,0 +1,74 @@
+name: CI
+
+# Semana 11-12 (CLAUDE.md §1.1): unit (siempre) + integration (contra la
+# pila Docker real, IT-01) en cada push/PR. Antes de esta sesión, IT-01 se
+# verificaba a mano -- ver docs/PROGRESS.md.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias (todas -- mock/consumer/backend/acquisition)
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-consumer.txt
+          pip install -r requirements-backend.txt
+          pip install -r requirements-acquisition.txt
+
+      # PYTHONPATH=src:. -- "." además de "src" porque tests/backend_fakes.py
+      # y tests/integration/conftest.py se importan como paquete `tests.*`
+      # desde otros archivos de test (ver tests/test_backend_routers_db.py).
+      - name: pytest (unit, --cov-fail-under=80 vía pytest.ini/.coveragerc)
+        run: PYTHONPATH=src:. pytest tests/ --ignore=tests/integration
+
+  integration:
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Instalar dependencias de test (paho-mqtt, pytest)
+        run: |
+          pip install -r requirements.txt
+          pip install -r requirements-consumer.txt
+
+      - name: Preparar .env de CI
+        run: cp .env.example .env
+
+      - name: Levantar broker + DBs + consumer (sin mock_starlink -- IT-01 publica sus propios payloads)
+        run: docker compose --profile mocks up -d --build broker starlink_db station_config_db consumer
+
+      - name: Esperar healthchecks
+        run: |
+          for i in $(seq 1 30); do
+            status=$(docker inspect -f '{{.State.Health.Status}}' starlink-health-db 2>/dev/null || echo "starting")
+            [ "$status" = "healthy" ] && break
+            sleep 2
+          done
+          docker compose ps
+
+      - name: pytest (integration, suite IT-01)
+        run: PYTHONPATH=src:. pytest tests/integration/ -v --no-cov -o addopts=""
+
+      - name: Logs en caso de falla
+        if: failure()
+        run: docker compose logs --tail=200
+
+      - name: Bajar la pila
+        if: always()
+        run: docker compose --profile mocks down -v

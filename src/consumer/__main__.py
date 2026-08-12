@@ -11,13 +11,12 @@ conexión y de deserialización/validación sin tumbar el contenedor.
 """
 
 import json
-import logging
 import os
-import sys
-import time
 
 import paho.mqtt.client as mqtt
 from paho.mqtt.properties import PacketTypes, Properties
+
+from common import connect_with_retry, setup_logging
 
 from .db import MeteoDB, NetHealthDB
 from .router import ConsumerRouter
@@ -31,48 +30,8 @@ TOPIC_METEO_EXTERNAL = "meteo/external/+"
 _SESSION_NEVER_EXPIRES = 0xFFFFFFFF
 
 
-class JsonLogFormatter(logging.Formatter):
-    """Formatter mínimo sin dependencias nuevas: una línea JSON por log."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        payload = {
-            "level": record.levelname,
-            "msg": record.getMessage(),
-            "logger": record.name,
-            "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
-        }
-        for key in ("node_id", "topic", "rc"):
-            if hasattr(record, key):
-                payload[key] = getattr(record, key)
-        return json.dumps(payload)
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("consumer")
-    logger.setLevel(logging.INFO)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonLogFormatter())
-    logger.addHandler(handler)
-    return logger
-
-
-def _connect_with_retry(client: mqtt.Client, host: str, port: int, logger: logging.Logger) -> None:
-    connect_properties = Properties(PacketTypes.CONNECT)
-    connect_properties.SessionExpiryInterval = _SESSION_NEVER_EXPIRES
-
-    delay = 1.0
-    while True:
-        try:
-            client.connect(host, port, keepalive=60, clean_start=False, properties=connect_properties)
-            return
-        except OSError as exc:
-            logger.warning("no se pudo conectar al broker, reintentando", extra={"rc": str(exc)})
-            time.sleep(delay)
-            delay = min(delay * 2, 30.0)
-
-
 def main() -> None:
-    logger = _setup_logging()
+    logger = setup_logging("consumer")
 
     mqtt_host = os.environ.get("MQTT_HOST", "localhost")
     mqtt_port = int(os.environ.get("MQTT_PORT", "1883"))
@@ -120,7 +79,12 @@ def main() -> None:
     client.on_disconnect = on_disconnect
     client.on_message = on_message
 
-    _connect_with_retry(client, mqtt_host, mqtt_port, logger)
+    connect_properties = Properties(PacketTypes.CONNECT)
+    connect_properties.SessionExpiryInterval = _SESSION_NEVER_EXPIRES
+    connect_with_retry(
+        client, mqtt_host, mqtt_port, logger,
+        clean_start=False, properties=connect_properties,
+    )
 
     logger.info("consumer arrancando", extra={"topic": TOPIC_STARLINK})
     client.loop_forever()

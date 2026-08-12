@@ -1,0 +1,16 @@
+# Dependencias del backend (src/backend -> Dockerfile.backend).
+# Extiende requirements.txt (pydantic, pytest) igual que requirements-consumer.txt
+# -- el backend reusa StarlinkPayloadIn de mock_starlink/schema.py (ADR-01) para
+# no duplicar la validación de POST /ingest/starlink (docs/07_API_REST.md §9.1).
+-r requirements.txt
+
+fastapi>=0.115,<1
+uvicorn[standard]>=0.32,<1
+
+# Mismo driver que el consumer (ADR-04: ORM/TCP hacia la DB) -- consultas de
+# solo lectura sobre starlink_health/station_config vía SQLAlchemy Core.
+sqlalchemy>=2.0,<3
+psycopg2-binary>=2.9,<3
+
+# TestClient de FastAPI para tests/test_backend_*.py.
+httpx>=0.27,<1

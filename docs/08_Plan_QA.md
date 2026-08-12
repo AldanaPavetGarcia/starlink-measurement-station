@@ -75,13 +75,14 @@ Verifica que el modelo Pydantic StarlinkPayloadIn acepta payloads válidos, rech
 
 | **TC-ID** | **Nombre del test** | **Precondición** | **Pasos / Acción** | **Resultado esperado** | **RF/RNF** | **Estado** |
 | --- | --- | --- | --- | --- | --- | --- |
-| **UT-01-01** | Parser acepta payload válido | Modelo Pydantic importado | Construir StarlinkPayloadIn con todos los campos válidos y schema_version='1.0' | No lanza ValidationError. Campos mapeados con tipos correctos (float, int, bool, datetime UTC). | RF-04 | PASS |
+| **UT-01-01** | Parser acepta payload válido | Modelo Pydantic importado | Construir StarlinkPayloadIn con todos los campos válidos y schema_version='1.1' | No lanza ValidationError. Campos mapeados con tipos correctos (float, int, bool, datetime UTC). | RF-04 | PASS |
 | **UT-01-02** | Parser rechaza latency_ms negativa | Modelo Pydantic importado | Pasar latency_ms=-5.0 en StarlinkMetricsIn | ValidationError con mensaje 'ge=0 constraint violated' en campo latency_ms. | RF-04 | PASS |
 | **UT-01-03** | Parser rechaza packet_loss > 100 | Modelo Pydantic importado | Pasar packet_loss_pct=150.0 | ValidationError con mensaje 'le=100 constraint violated'. | RF-04 | PASS |
 | **UT-01-04** | Parser rechaza timestamp sin timezone | Modelo Pydantic importado | Pasar timestamp='2026-06-01T14:30:00' (sin Z ni offset) | ValidationError con mensaje 'timestamp debe incluir timezone'. | RF-04 | PASS |
 | **UT-01-05** | Parser rechaza schema_version desconocida | Modelo Pydantic importado | Pasar schema_version='2.0' | ValidationError con mensaje 'schema_version 2.0 no soportada'. | RF-04 | PASS |
 | **UT-01-06** | Parser convierte timestamp a UTC | Modelo Pydantic importado | Pasar timestamp='2026-06-01T11:30:00-03:00' (UTC-3 Córdoba) | Modelo almacena datetime con tzinfo=UTC y hora=14:30:00. | RF-04 | PASS |
-| **UT-01-07** | Parser acepta campos opcionales como None | Modelo Pydantic importado | Omitir snr_db, is_obstructed, satellite_count del payload | No lanza error. Campos opcionales son None en el objeto resultante. | RF-03 | PASS |
+| **UT-01-07** | Parser acepta campos opcionales como None | Modelo Pydantic importado | Omitir snr_low, is_obstructed, satellite_count del payload | No lanza error. Campos opcionales son None en el objeto resultante. | RF-03 | PASS |
+| **UT-01-08** | Parser rechaza schema_version '1.0' (obsoleta, ADR-17) | Modelo Pydantic importado | Pasar schema_version='1.0' (versión pre-`snr_low`) | ValidationError con mensaje 'schema_version 1.0 no soportada'. | RF-04, ADR-17 | PASS |
 
 ### **Suite UT-02 — Validación de paquetes ambientales**
 
@@ -114,11 +115,11 @@ El mock de telemetría usa un Random Walk con inercia temporal (ADR-06). Estas p
 | **UT-04-01** | Latencia nunca cae por debajo del piso físico LEO | StarlinkMockAgent instanciado | Generar 10.000 muestras consecutivas | latency_ms >= 20.0 en el 100% de las muestras (piso físico de propagación LEO). | RF-05 | PASS |
 | **UT-04-02** | Perfil STORM inyecta spikes de handover | StarlinkMockAgent(chaos_profile='STORM') | Generar 1.000 muestras | Al menos el 15% de muestras con latency_ms > 150 ms (handover satelital simulado). | RF-05 | PASS |
 | **UT-04-03** | Payload generado supera validación Pydantic | StarlinkMockAgent instanciado | Generar 1.000 payloads y validar cada uno con StarlinkPayloadIn | 0 ValidationErrors en las 1.000 iteraciones. | RF-05 | PASS |
-| **UT-04-04** | schema_version es siempre '1.0' | StarlinkMockAgent instanciado | Generar 100 payloads | payload['schema_version'] == '1.0' en el 100% de los casos. | RF-05 | PASS |
+| **UT-04-04** | schema_version es siempre '1.1' | StarlinkMockAgent instanciado | Generar 100 payloads | payload['schema_version'] == '1.1' en el 100% de los casos. | RF-05 | PASS |
 
 ## **3.3 Configuración de pytest y cobertura**
 
-| # pytest.ini [pytest] asyncio_mode   = auto testpaths      = tests/unit tests/integration tests/e2e log_cli        = true log_cli_level  = INFO # conftest.py — fixtures compartidas import pytest from unittest.mock import AsyncMock, MagicMock @pytest.fixture def valid_starlink_payload():     return {         "schema_version": "1.0",         "node_id": "lit-cordoba-01",         "timestamp":  "2026-06-01T14:30:00Z",         "metrics": {             "latency_ms":              35.4,             "jitter_ms":               4.2,             "packet_loss_pct":         0.5,             "throughput_down_bps":     187300000,             "throughput_up_bps":       22100000,             "snr_db":                  9.0,             "is_obstructed":           False,             "satellite_count":         14         }     } @pytest.fixture def mock_db_net():     db = MagicMock()     db.insert = AsyncMock(return_value=True)     return db # Ejecución con cobertura: # pytest tests/unit -v --cov=src --cov-report=html --cov-fail-under=80 |
+| # pytest.ini [pytest] asyncio_mode   = auto testpaths      = tests/unit tests/integration tests/e2e log_cli        = true log_cli_level  = INFO # conftest.py — fixtures compartidas import pytest from unittest.mock import AsyncMock, MagicMock @pytest.fixture def valid_starlink_payload():     return {         "schema_version": "1.1",         "node_id": "lit-cordoba-01",         "timestamp":  "2026-06-01T14:30:00Z",         "metrics": {             "latency_ms":              35.4,             "jitter_ms":               4.2,             "packet_loss_pct":         0.5,             "throughput_down_bps":     187300000,             "throughput_up_bps":       22100000,             "snr_low":                 False,             "is_obstructed":           False,             "satellite_count":         14,             "handover_count":          0,             "outage_duration_ms":      0.0,             "tilt_angle_deg":          2.1,             "boresight_azimuth_deg":   184.3,             "boresight_elevation_deg": 51.7,             "desired_boresight_azimuth_deg":   184.0,             "desired_boresight_elevation_deg": 52.0,             "attitude_uncertainty_deg": 0.3         }     } @pytest.fixture def mock_db_net():     db = MagicMock()     db.insert = AsyncMock(return_value=True)     return db # Ejecución con cobertura: # pytest tests/unit -v --cov=src --cov-report=html --cov-fail-under=80 |
 | --- |
 
 | **Nivel 2 — Pruebas de Integración** |
@@ -136,6 +137,13 @@ Las pruebas de integración verifican que los componentes reales se comunican co
 ### **Descripción del flujo bajo prueba**
 
 Mock publica en starlink/metrics/lit-test → Broker Mosquitto (test) → Consumer Python → Pydantic valida → INSERT en network_metrics → Verificación con SELECT.
+
+> Automatizada en Semana 11-12 (`tests/integration/test_it01_pipeline.py`,
+> job `integration` de `.github/workflows/ci.yml`) — hasta entonces esta
+> suite se verificaba a mano contra `docker compose --profile mocks up
+> --build`, ver `docs/PROGRESS.md`. Publica directo al broker (no pasa por
+> el mock, para controlar el payload exacto de cada caso) y verifica con
+> `docker exec ... psql` en vez de TCP directo a Postgres (ADR-14).
 
 | **TC-ID** | **Nombre del test** | **Precondición** | **Pasos / Acción** | **Resultado esperado** | **RF/RNF** | **Estado** |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -208,7 +216,7 @@ Las pruebas E2E levantan la pila Docker completa de producción (docker-compose.
 | **E2E-CA04** | Dashboard correlación muestra datos de ambas DBs | Grafana + ambas DBs con datos simultáneos. | Abrir dashboard 'Correlación Red-Clima'. Verificar que el panel combinado tiene datos de las 2 fuentes. | Panel muestra series de latency_ms y temperature_c en el mismo eje temporal sin errores de datasource. | CA-04, RF-33 | PASS |
 | **E2E-CA05** | Acceso remoto SSH funcional | RPi5 en red con túnel configurado. | Conectar vía SSH con clave pública desde fuera de la red LIT: ssh -i lit_key alumno@rpi5.tunnel.domain | Conexión establecida sin contraseña. bash interactivo disponible en el RPi5. | CA-05, RF-37 | PASS |
 | **E2E-CA06** | Despliegue desde cero en < 30 min | Máquina limpia con Docker instalado. README.md disponible. | Seguir el README desde cero: clonar repo, copiar .env, docker-compose up. Medir tiempo hasta Grafana disponible. | Sistema completo operativo en < 30 minutos. Grafana accesible en http://localhost:3000. | CA-06, RNF-11 | PASS |
-| **E2E-CA08** | Interfaces coherentes: paquete MQTT == esquema DB | Pila completa corriendo. | 1. Capturar 10 paquetes con mosquitto_sub. 2. Comparar campos con schema de las tablas del DER. | Todos los campos del paquete MQTT existen en la DB con los tipos correctos. schema_version='1.0'. | CA-08, ADR-01 | PASS |
+| **E2E-CA08** | Interfaces coherentes: paquete MQTT == esquema DB | Pila completa corriendo. | 1. Capturar 10 paquetes con mosquitto_sub. 2. Comparar campos con schema de las tablas del DER. | Todos los campos del paquete MQTT existen en la DB con los tipos correctos. schema_version='1.1'. | CA-08, ADR-01 | PASS |
 
 | **Nivel 4 — Pruebas de Estrés y Capacidad (TIME_WARP)** |
 | --- |
@@ -252,6 +260,13 @@ La estrategia usa el parámetro TIME_WARP_FACTOR en el mock: en lugar de publica
 ## **6.5 Script de prueba de estrés con Locust**
 
 Locust simula clientes concurrentes consultando la API REST mientras el mock inyecta mensajes a alta velocidad. Esto replica el escenario real: el RPi5 ingesta datos AND sirve consultas de Grafana simultáneamente.
+
+> Implementado en `tests/stress/locustfile.py` (Semana 21) — adaptado del
+> snippet de referencia de abajo: `API_KEY` → `BACKEND_API_KEY` (nombre real
+> de `src/backend/config.py`), sin la tarea de `/metrics/env` (dominio de
+> Fede, no montado en el backend todavía) y con `/metrics/starlink/summary`
+> agregado. **No ejecutado contra hardware real en esta sesión** — ver
+> `docs/PROGRESS.md` §Semana 21.
 
 | # locustfile.py — simula clientes Grafana consultando la API bajo carga from locust import HttpUser, task, between import os API_KEY = os.getenv("API_KEY", "test-key") class GrafanaUser(HttpUser):     """Simula un panel de Grafana refrescando cada 30 s."""     wait_time = between(25, 35)   # refresh cada ~30 s     headers   = {"X-API-Key": API_KEY}     @task(5)     def query_starlink_7d(self):         """Consulta más frecuente: 7 días de latencia (usa CAGG net_hourly)."""         self.client.get(             "/api/v1/metrics/starlink"             "?node_id=lit-cordoba-01"             "&start=2026-05-25T00:00:00Z"             "&end=2026-06-01T00:00:00Z"             "&resolution=hourly",             headers=self.headers, name="/metrics/starlink [7d hourly]"         )     @task(3)     def query_env_24h(self):         """Consulta ambiental: últimas 24 h en crudo."""         self.client.get(             "/api/v1/metrics/env"             "?node_id=lit-cordoba-01"             "&start=2026-05-31T00:00:00Z"             "&end=2026-06-01T00:00:00Z"             "&source=local_sensor",             headers=self.headers, name="/metrics/env [24h raw]"         )     @task(1)     def health_check(self):         self.client.get("/api/v1/health", name="/health")     @task(1)     def query_latest(self):         self.client.get(             "/api/v1/metrics/starlink/latest?node_id=lit-cordoba-01",             headers=self.headers, name="/metrics/starlink/latest"         ) # Ejecución del test de estrés combinado: # Terminal 1: arrancar mock con TIME_WARP alto #   TIME_WARP_FACTOR=3600 docker-compose --profile stress up mock_starlink mock_env # # Terminal 2: correr Locust con 10 usuarios concurrentes #   locust -f locustfile.py --headless -u 10 -r 2 --run-time 5m \ #          --host http://localhost:8000 --html reports/stress_report.html |
 | --- |
