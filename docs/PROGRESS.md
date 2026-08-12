@@ -981,7 +981,9 @@ nada en la RPi5 más allá de usar `grpcurl` de solo lectura):
       host). Se saltea sola (`pytest.skip`) si el contenedor
       `starlink-health-db` no está corriendo, para que `pytest tests/` sin
       infraestructura levantada siga funcionando igual que antes.
-- [x] Configurar `pytest-cov` con `--cov-fail-under=80` en tus módulos —
+- [x] Configurar `pytest-cov` con `--cov-fail-under=90` en tus módulos (subido
+      de 80% a 90% el 12/08/2026, con 94.79% real ya alcanzado — margen
+      suficiente sin aflojar el piso) —
       `pytest.ini` (`addopts`, corre por default) + `.coveragerc`
       (`omit = */__main__.py`: los loops de conexión MQTT de
       mock_starlink/consumer/acquisition son casi sin lógica propia y se
