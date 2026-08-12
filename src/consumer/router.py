@@ -35,7 +35,7 @@ class _InsertDB(Protocol):
     def insert(self, row: dict[str, Any]) -> None: ...
 
 
-def _starlink_row(payload: StarlinkPayloadIn) -> dict[str, Any]:
+def starlink_row(payload: StarlinkPayloadIn) -> dict[str, Any]:
     m = payload.metrics
     return {
         "time": payload.timestamp,
@@ -45,9 +45,17 @@ def _starlink_row(payload: StarlinkPayloadIn) -> dict[str, Any]:
         "packet_loss_pct": m.packet_loss_pct,
         "throughput_down_bps": m.throughput_down_bps,
         "throughput_up_bps": m.throughput_up_bps,
-        "snr_db": m.snr_db,
+        "snr_low": m.snr_low,
         "is_obstructed": m.is_obstructed,
         "satellite_count": m.satellite_count,
+        "handover_count": m.handover_count,
+        "outage_duration_ms": m.outage_duration_ms,
+        "tilt_angle_deg": m.tilt_angle_deg,
+        "boresight_azimuth_deg": m.boresight_azimuth_deg,
+        "boresight_elevation_deg": m.boresight_elevation_deg,
+        "desired_boresight_azimuth_deg": m.desired_boresight_azimuth_deg,
+        "desired_boresight_elevation_deg": m.desired_boresight_elevation_deg,
+        "attitude_uncertainty_deg": m.attitude_uncertainty_deg,
         "schema_version": payload.schema_version,
     }
 
@@ -77,7 +85,7 @@ class ConsumerRouter:
             return True
 
         try:
-            self.net_db.insert(_starlink_row(validated))
+            self.net_db.insert(starlink_row(validated))
         except Exception as exc:  # noqa: BLE001 -- cualquier falla de DB es transitoria
             logger.error(
                 "fallo al insertar en network_metrics, se retiene el ACK MQTT",

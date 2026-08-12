@@ -113,7 +113,7 @@ objeto anidado **`metrics`** con las métricas de red propiamente dichas (ADR-01
 
 | **Campo** | **Tipo** | **Descripción** | **Ejemplo** |
 | --- | --- | --- | --- |
-| schema_version | string | Versión del esquema de paquete | "1.0" |
+| schema_version | string | Versión del esquema de paquete | "1.1" |
 | node_id | string | Identificador único del nodo | "lit-cordoba-01" |
 | timestamp | string (ISO 8601) | Instante UTC de la medición | "2026-06-01T14:30:00Z" |
 
@@ -126,15 +126,23 @@ objeto anidado **`metrics`** con las métricas de red propiamente dichas (ADR-01
 | packet_loss_pct | float / null | Porcentaje de paquetes perdidos (0–100) | 0.5 |
 | throughput_down_bps | integer / null | Velocidad de bajada medida (bits por segundo) | 187300000 |
 | throughput_up_bps | integer / null | Velocidad de subida medida (bits por segundo) | 22100000 |
-| snr_db | float / null | Signal-to-Noise Ratio reportado por la API interna de la terminal (si disponible) | 9.0 |
+| snr_low | boolean / null | Señal persistentemente baja, reportado por la API interna de la terminal (`isSnrPersistentlyLow`, si disponible). Reemplaza `snr_db` desde v1.1 — el firmware real no expone SNR numérico (ver ADR-17) | false |
 | is_obstructed | boolean / null | Obstrucción del campo visual (FOV) reportada por la API interna (si disponible) | false |
 | satellite_count | integer / null | Cantidad de satélites en vista (si disponible) | 14 |
+| handover_count | integer / null | Cantidad de eventos de handover satelital detectados desde la medición anterior (si disponible). 0 es el valor normal cuando no hubo handovers; null solo si la medición falló (ver ADR-16) | 0 |
+| outage_duration_ms | float / null | Milisegundos totales de corte asociados a esos handovers, en el mismo intervalo (si disponible). 0 es el valor normal; null solo si la medición falló (ADR-16) | 0.0 |
+| tilt_angle_deg | float / null | Inclinación física de la antena, en grados (si disponible, ver ADR-18) | 2.1 |
+| boresight_azimuth_deg | float / null | Azimuth real de apuntamiento, en grados (ADR-18) | 184.3 |
+| boresight_elevation_deg | float / null | Elevación real de apuntamiento, en grados (ADR-18) | 51.7 |
+| desired_boresight_azimuth_deg | float / null | Azimuth objetivo calculado por la antena, en grados (ADR-18) | 184.0 |
+| desired_boresight_elevation_deg | float / null | Elevación objetivo calculada por la antena, en grados (ADR-18) | 52.0 |
+| attitude_uncertainty_deg | float / null | Incertidumbre del algoritmo de estimación de actitud, en grados (ADR-18) | 0.3 |
 
 Ejemplo de paquete completo:
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "node_id": "lit-cordoba-01",
   "timestamp": "2026-06-01T14:30:00Z",
   "metrics": {
@@ -143,9 +151,17 @@ Ejemplo de paquete completo:
     "packet_loss_pct": 0.5,
     "throughput_down_bps": 187300000,
     "throughput_up_bps": 22100000,
-    "snr_db": 9.0,
+    "snr_low": false,
     "is_obstructed": false,
-    "satellite_count": 14
+    "satellite_count": 14,
+    "handover_count": 0,
+    "outage_duration_ms": 0.0,
+    "tilt_angle_deg": 2.1,
+    "boresight_azimuth_deg": 184.3,
+    "boresight_elevation_deg": 51.7,
+    "desired_boresight_azimuth_deg": 184.0,
+    "desired_boresight_elevation_deg": 52.0,
+    "attitude_uncertainty_deg": 0.3
   }
 }
 ```
@@ -157,6 +173,22 @@ Ejemplo de paquete completo:
 > estructura de envelope + `metrics` anidado también refleja la
 > implementación real (antes esta sección mostraba una tabla plana) — ver
 > ADR-01 y `docs/PROGRESS.md`.
+>
+> `handover_count`/`outage_duration_ms` agregados por ADR-16 (agosto 2026),
+> derivados de `get_history.dishGetHistory.outages[].didSwitch` de la API
+> real de la antena — ver `docs/PROGRESS.md` §Semana 10 para el relevamiento
+> que sustenta la decisión.
+>
+> **`snr_db` → `snr_low` (ADR-17, agosto 2026)**: el relevamiento contra
+> hardware real confirmó que el firmware actual no expone SNR numérico, solo
+> `isSnrPersistentlyLow`/`isSnrAboveNoiseFloor`. Cambio de tipo incompatible
+> con v1.0 → bump de `schema_version` a **"1.1"**; `StarlinkPayloadIn`
+> rechaza explícitamente `"1.0"` desde este cambio.
+>
+> `tilt_angle_deg`/`boresight_*`/`desired_boresight_*`/
+> `attitude_uncertainty_deg` agregados por ADR-18 (agosto 2026, pedido del
+> director), derivados de `dishGetStatus.alignmentStats` — correlato físico
+> entre orientación de la antena y condiciones ambientales (viento).
 
 ### 5.2 Paquete de Datos Ambientales (Sensor Local)
 
@@ -218,7 +250,7 @@ Los requerimientos se clasifican por subsistema y se les asigna prioridad: **Alt
 | --- | --- | --- |
 | **RF-01** | El script de telemetría DEBE ejecutarse periódicamente (período configurable, por defecto 60 s) mediante un mecanismo de orquestación temporal (cron, scheduler Python o equivalente). | Alta |
 | **RF-02** | El script DEBE medir latencia (RTT), jitter, pérdida de paquetes, throughput de bajada y subida utilizando herramientas de red estándar (ping, iperf3, speedtest-cli o equivalentes). | Alta |
-| **RF-03** | El script DEBE incorporar, cuando esté disponible, métricas adicionales provistas por la API local de diagnóstico de la terminal Starlink (`is_obstructed`, `snr_db`, `satellite_count`). | Media |
+| **RF-03** | El script DEBE incorporar, cuando esté disponible, métricas adicionales provistas por la API local de diagnóstico de la terminal Starlink (`is_obstructed`, `snr_low`, `satellite_count`, `handover_count`, `outage_duration_ms` — ADR-16/ADR-17, y los campos de orientación física `tilt_angle_deg`/`boresight_*`/`desired_boresight_*`/`attitude_uncertainty_deg` — ADR-18). | Media |
 | **RF-04** | El script DEBE publicar los resultados empaquetados en formato JSON (ver §5.1) en el broker MQTT en el tópico correspondiente. | Alta |
 | **RF-05** | DEBE existir un Mock del script de telemetría que genere datos sintéticos plausibles (distribuciones estadísticas configurables) y publique en los mismos tópicos con la misma morfología. | Alta |
 

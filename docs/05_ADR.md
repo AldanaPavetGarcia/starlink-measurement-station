@@ -52,6 +52,9 @@ Este documento es de carácter vivo: cada ADR puede ser superado por uno posteri
 | **ADR-13** | Plataforma de Visualización y Dashboards | Observabilidad | Grafana OSS sobre desarrollo frontend a medida | **Propuesto** |
 | **ADR-14** | Postura de Seguridad y Exposición de Puertos | Observabilidad | Zero Trust local: solo puerto Grafana expuesto externamente + filtrado de IP | **Propuesto** |
 | **ADR-15** | Mock de Videomonitoreo (Streaming) | Observabilidad | Microservicio Flask/MJPEG a 5 FPS sobre placeholder estático | **Propuesto** |
+| **ADR-16** | Exposición de Eventos de Handover Satelital | Esquema / HW real | Campos agregados `handover_count`/`outage_duration_ms` en `metrics` | **Propuesto** |
+| **ADR-17** | Reemplazo de `snr_db` por `snr_low` | Esquema / HW real | Booleano `snr_low` (← `isSnrPersistentlyLow`) sobre float inexistente en firmware real | **Propuesto** |
+| **ADR-18** | Exposición de `alignmentStats` (Orientación Física de la Antena) | Esquema / HW real | Campos planos de tilt/azimuth/elevación en `metrics`, sin sub-objeto anidado | **Propuesto** |
 
 # FASE 1 — Diseño y Definición de Contratos
 
@@ -125,11 +128,11 @@ Se extrae el dato en Protobuf nativo de la antena usando starlink-grpc-tools. In
 
 ### Estructura concreta del payload: envelope + `metrics` anidado
 
-El JSON del paquete Starlink tiene dos niveles, no es una tabla plana de campos al mismo nivel: un envelope con metadatos de identificación (`schema_version`, `node_id`, `timestamp`) y un objeto anidado `metrics` con las métricas de red (`latency_ms`, `jitter_ms`, `packet_loss_pct`, `throughput_down_bps`, `throughput_up_bps`, `snr_db`, `is_obstructed`, `satellite_count`):
+El JSON del paquete Starlink tiene dos niveles, no es una tabla plana de campos al mismo nivel: un envelope con metadatos de identificación (`schema_version`, `node_id`, `timestamp`) y un objeto anidado `metrics` con las métricas de red (`latency_ms`, `jitter_ms`, `packet_loss_pct`, `throughput_down_bps`, `throughput_up_bps`, `snr_low`, `is_obstructed`, `satellite_count`, `handover_count`, `outage_duration_ms`, `tilt_angle_deg`, `boresight_azimuth_deg`, `boresight_elevation_deg`, `desired_boresight_azimuth_deg`, `desired_boresight_elevation_deg`, `attitude_uncertainty_deg`):
 
 ```json
 {
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "node_id": "lit-cordoba-01",
   "timestamp": "2026-06-01T14:30:00Z",
   "metrics": {
@@ -138,14 +141,30 @@ El JSON del paquete Starlink tiene dos niveles, no es una tabla plana de campos 
     "packet_loss_pct": 0.5,
     "throughput_down_bps": 187300000,
     "throughput_up_bps": 22100000,
-    "snr_db": 9.0,
+    "snr_low": false,
     "is_obstructed": false,
-    "satellite_count": 14
+    "satellite_count": 14,
+    "handover_count": 0,
+    "outage_duration_ms": 0.0,
+    "tilt_angle_deg": 2.1,
+    "boresight_azimuth_deg": 184.3,
+    "boresight_elevation_deg": 51.7,
+    "desired_boresight_azimuth_deg": 184.0,
+    "desired_boresight_elevation_deg": 52.0,
+    "attitude_uncertainty_deg": 0.3
   }
 }
 ```
 
-Motivo: separa el ciclo de vida del envelope (identidad del paquete, rara vez cambia) del ciclo de vida de `metrics` (sí puede evolucionar — nuevos campos de telemetría con futuros firmwares de la antena) sin acoplar la validación de uno al otro. Ya implementado así en `src/mock_starlink/schema.py` (`StarlinkPayloadIn.metrics: StarlinkMetrics`) y verificado end-to-end contra un broker real (`docker compose --profile mocks up`, semana 4-5). Esta estructura gobierna el paquete MQTT y el body de `POST /ingest/starlink` — no aplica a las filas de `network_metrics` ni a la salida de los GET de la API REST, que son planas por naturaleza (columnas SQL).
+Motivo: separa el ciclo de vida del envelope (identidad del paquete, rara vez cambia) del ciclo de vida de `metrics` (sí puede evolucionar — nuevos campos de telemetría con futuros firmwares de la antena) sin acoplar la validación de uno al otro. Ya implementado así en `src/mock_starlink/schema.py` (`StarlinkPayloadIn.metrics: StarlinkMetrics`) y verificado end-to-end contra un broker real (`docker compose --profile mocks up`, semana 4-5). Esta estructura gobierna el paquete MQTT y el body de `POST /ingest/starlink` — no aplica a las filas de `network_metrics` ni a la salida de los GET de la API REST, que son planas por naturaleza (columnas SQL). Campos de `snr_low` en adelante agregados por ADR-16/17/18 (agosto 2026, `schema_version` 1.0→1.1).
+
+### Enmienda: mecanismo de extracción real — `grpcurl` en vez de `grpcio`+`starlink-grpc-tools`
+
+Este ADR (párrafo de Decisión, arriba) describe la extracción vía `starlink-grpc-tools`, que usa `grpcio` con bindings Python compilados contra los `.proto` de la comunidad. Al implementar `src/acquisition/` (Semana 10) se optó en cambio por **`grpcurl`** (invocado como subproceso, `src/acquisition/grpc_client.py`), aprovechando que la antena expone *server reflection* — confirmado en el relevamiento presencial del 04/08/2026 (`docs/PROGRESS.md` §Semana 10: `grpcurl -plaintext 192.168.100.1:9200 list` funciona sin compilar nada).
+
+**No cambia la decisión de fondo de este ADR** (Protobuf nativo → dict Python → Pydantic → JSON) — solo el mecanismo de la primera flecha. Motivo del cambio: reflection en runtime evita vendorizar/mantener los `.proto` propietarios de Starlink en este repo, es el método ya validado a mano contra la antena real durante el relevamiento (mismo comando, mismo resultado), y no depende de que `starlink-grpc-tools` mantenga sus wrappers actualizados contra cambios de firmware. Contra: un proceso `grpcurl` por llamada tiene más overhead que una llamada gRPC nativa in-process — aceptable dado el intervalo de polling de 60s (RF-01), muy por debajo de cualquier límite de throughput relevante.
+
+⚠️ Sin acceso presencial a la RPi5/antena en la sesión donde se escribió `src/acquisition/`, este cambio de mecanismo no se validó todavía contra hardware real — queda pendiente de confirmar en la próxima visita al LIT (ver `docs/PROGRESS.md` §Semana 10).
 
 ### Justificación — Rechazo de Alternativas
 
@@ -477,16 +496,22 @@ El mock mantiene un estado interno (latencia actual, estado de obstrucción, con
 | packet_loss_pct | Bernoulli(p=0.005) × 100 | 0–2 % | Obstrucción: 5–40 %; Caída (outage multi-tick): 100 % por 2–5 min |
 | throughput_down_bps | Normal(180, 30) Mbps, publicado en bps | 80–300 Mbps | Degradación: 5–50 Mbps durante obstrucción |
 | throughput_up_bps | Normal(22, 5) Mbps, publicado en bps | 8–40 Mbps | Degradación: 1–8 Mbps durante obstrucción, correlacionado con down |
-| snr_db | Normal(9, 3) dB | -20 a 30 dB (clamp) | Degradación: 10–20 dB adicionales durante obstrucción |
+| snr_low | Booleano, probabilidad base baja por perfil (reemplaza el random walk de `snr_db`, ADR-17) | Mayormente False | Probabilidad de True sube marcadamente durante obstrucción/handover |
 | is_obstructed | Derivado de un estado interno de obstrucción no publicado (`obstruction_pct` uniforme 0–3 % en estado normal) > 10 % | — | TRUE durante evento de obstrucción (3–10 ticks consecutivos, 20–80 % interno) |
 | satellite_count | Normal(15, 3), clamp 0–30 | 10–20 | Cae 3–8 satélites durante obstrucción u handover |
+| handover_count | 1 si hubo `handover_event` en el tick, 0 si no (ADR-16) | 0 | 1 durante handover — el mock nunca genera más de un evento por tick |
+| outage_duration_ms | Uniform(200, 1200) ms si hubo `handover_event`, 0.0 si no (ADR-16, calibrado contra `eventLog` real del relevamiento) | 0.0 | 200–1200 ms durante handover |
+| tilt_angle_deg / boresight_azimuth_deg / boresight_elevation_deg | Random walk lento alrededor de un `desired_boresight_*` fijo por nodo (ADR-18) | Desviación mínima en estado normal | Desviación real↔deseada se agranda durante handover/obstrucción (viento simulado) |
 
 > Tabla corregida al vocabulario del DER/`schema.py` (bps en vez de Mbps,
-> `is_obstructed`/`snr_db` en vez de `obstruction_pct`/`signal_quality`,
+> `is_obstructed`/`snr_low` en vez de `obstruction_pct`/`signal_quality`,
 > `satellite_count` agregado) — mismo drift que ya se había corregido en
 > `docs/03_SRS.md` §5.1, extendido acá. Refleja la calibración real de
 > `src/mock_starlink/mock.py` (`CHAOS_PARAMS`), no solo el mecanismo
-> general descrito en la Decisión de este ADR. Ver `docs/PROGRESS.md`.
+> general descrito en la Decisión de este ADR. `snr_low`, `handover_count`,
+> `outage_duration_ms` y los campos de alineación agregados por
+> ADR-16/17/18 (agosto 2026), reemplazando/extendiendo la fila original de
+> `snr_db`. Ver `docs/PROGRESS.md`.
 
 ### Pros y Contras
 
@@ -877,6 +902,22 @@ El RPi5 estará conectado a la red del LIT (intranet universitaria) y potencialm
 
 - Resolución DNS interna Docker: Grafana apunta a los contenedores de DB por nombre de servicio (ej. timescaledb_net:5432), no por IP. No hay IPs hardcodeadas en ninguna configuración.
 
+### Mecanismo concreto de filtrado de IP (Semana 15-16)
+
+`CLAUDE.md` §4 resume ADR-14 como "Zero Trust local: solo puerto Grafana expuesto externamente **+ filtrado de IP**", pero hasta esta sesión el ADR nunca especificaba *cómo* — la tabla de arriba dice "✅ Expuesto públicamente (con autenticación)" sin mecanismo de filtrado. Se cierra ese punto abierto:
+
+**Etapa 1 (on-premises, RPi5 en el LIT):** filtrado a nivel de firewall del host, no en `docker-compose.yml` (Docker no filtra por IP de origen sin plugins adicionales). `ufw`/`iptables` en la RPi5 restringe el puerto 3000 a: la subred de la intranet del LIT (acceso del equipo desde dentro del laboratorio) + IPs puntuales del director/co-director si necesitan acceso remoto puntual. Ejemplo de regla (documentado, no ejecutado — requiere acceso a la RPi5 real, ver `docs/PROGRESS.md` §Semana 10):
+
+```bash
+sudo ufw allow from <subred-LIT>/24 to any port 3000 proto tcp
+sudo ufw allow from <IP-director> to any port 3000 proto tcp
+sudo ufw deny 3000/tcp   # regla de default-deny, después de los allow puntuales
+```
+
+**Etapa 2 (cloud):** el filtrado pasa al security group / firewall del proveedor cloud (mismo mecanismo, distinta herramienta) — no cambia el principio, solo dónde se aplica la regla, consistente con el plan de migración de `CLAUDE.md` §6 ("solo cambian `DB_HOST`/`MQTT_HOST` en `.env`", acá también cambia dónde vive la regla de firewall, no el diseño).
+
+Es una medida operativa (configuración del host/red), no algo que `docker-compose.yml` pueda expresar — por eso no hay cambio de código correspondiente, solo esta documentación y la referencia en `README.md`.
+
 ## ADR-15 — Mock de Videomonitoreo: Placeholder Estático vs. Streaming MJPEG Activo
 
 | **Atributo** | **Valor** |
@@ -922,19 +963,234 @@ A 5 FPS con JPEG quality 50 y resolución 720p, el stream consume aproximadament
 
 - No se requieren cambios en ningún otro componente del sistema.
 
+## ADR-16 — Exposición de Eventos de Handover Satelital en el Esquema de Telemetría
+
+| **Atributo** | **Valor** |
+| --- | --- |
+| **ID** | ADR-16 |
+| **Estado** | Propuesto |
+| **Fecha** | Agosto 2026 |
+| **Depende de** | ADR-01, ADR-06 |
+| **Impacta en** | ADR-08, ADR-11, ADR-13 |
+
+### Contexto y Motivación
+
+El relevamiento contra la antena real del LIT (sesión de laboratorio del 04/08/2026, detalle completo en `docs/PROGRESS.md` §Semana 10) confirmó que el gRPC de la terminal expone un indicador explícito y oficial de cambio de satélite/haz: `get_history.dishGetHistory.outages[].didSwitch` (booleano por corte), acompañado de `eventLog.events[].reason` con categorías de causa (`EVENT_REASON_OUTAGE_NO_PINGS`, `EVENT_REASON_OUTAGE_NO_DOWNLINK`, etc.) y duración en nanosegundos.
+
+El mock ya modela esto internamente: `StarlinkMockAgent.generate_payload()` (`src/mock_starlink/mock.py`) calcula un `handover_event` booleano por tick (`CHAOS_PARAMS`, ADR-06) que usa para inflar `latency_ms`/`jitter_ms` y degradar `satellite_count` — pero nunca lo expone como campo propio del payload. Sin un campo dedicado, Grafana solo puede *inferir* handovers heurísticamente a partir de picos de latencia/jitter, lo cual es ambiguo (una tormenta u obstrucción puede producir el mismo patrón visual, ADR-06 §Parámetros estadísticos) y no permite un panel de eventos confiable. El director del PI pidió explícitamente poder exponer esta información en el dashboard de Grafana.
+
+Nota de alcance: este ADR resuelve únicamente la exposición del *efecto observable* del handover (ocurrencia + duración del corte asociado). No expone identidad de satélite/beam — la API no lo provee, y hacerlo caería en ingeniería inversa de mecanismos internos propietarios de Starlink, marcado fuera de alcance en CLAUDE.md §1.1.
+
+### Alternativas Consideradas
+
+| **Aspecto** | **Alt. A — Booleano `is_handover`** | **Alt. B — Conteo + duración agregados ✅** |
+| --- | --- | --- |
+| Fidelidad a la señal real de la API | ⚠️ Colapsa a un solo bit por medición; si hay más de un `outage` con `didSwitch=true` en la ventana de polling (60 s), se pierde esa multiplicidad | ✅ `handover_count` conserva cuántos hubo; `outage_duration_ms` conserva el impacto agregado en tiempo de corte |
+| Complejidad del extractor real | ✅ Trivial: `any(o.didSwitch for o in outages_en_la_ventana)` | ⚠️ Requiere que el extractor lleve estado (timestamp del último poll) para filtrar `outages`/`eventLog` por ventana y sumarizar — primer caso de estado explícito entre polls en el extractor (`get_status` es stateless por diseño) |
+| Equivalencia con el mock | ✅ Directa — el mock ya tiene `handover_event` booleano por tick | ✅ También directa — un tick del mock nunca genera más de un evento, así que `handover_count` cae naturalmente en {0, 1} sin cambiar el modelo de generación |
+| Utilidad analítica en Grafana | ⚠️ Solo permite un marcador binario superpuesto (como ya hace el panel 4 con `is_obstructed`) | ✅ Permite un panel de barras "handovers por hora" (`SUM(handover_count)` vía continuous aggregate) y correlacionar la duración real del corte con el impacto en `packet_loss_pct`/`latency_ms` — más rico para el objetivo de correlación del PI (CLAUDE.md §1) |
+| Costo de esquema (DB/DER) | ✅ Una columna `BOOLEAN` | ⚠️ Dos columnas (`SMALLINT` + `FLOAT8`), mismo orden de magnitud que el resto de `network_metrics` |
+
+### Decisión
+
+**✅ Decisión: Alternativa B — Campos agregados `handover_count` y `outage_duration_ms`**
+
+Se agregan dos campos nuevos a `metrics` (`StarlinkPayloadIn`, ADR-01):
+
+- **`handover_count`** (integer / null): cantidad de eventos de handover (`didSwitch=true`) detectados desde la medición anterior.
+- **`outage_duration_ms`** (float / null): milisegundos totales de corte asociados a esos eventos, en el mismo intervalo.
+
+**Semántica NULL vs. cero** (mismo patrón que el resto de `metrics`, ADR-01/DER): `NULL` significa que la medición no está disponible (falló la consulta a `get_history`); `0` es el valor normal cuando no hubo ningún handover en el intervalo. `0` **no** es "sin dato" — es exactamente lo que reportan la mayoría de los ciclos de medición.
+
+### Derivación en el extractor real
+
+`get_history.dishGetHistory.outages[]` trae `cause`, `startTimestampNs`, `durationNs`, `didSwitch` por corte. En cada poll (cada 60 s por defecto), el extractor filtra los `outages` con `startTimestampNs` posterior al timestamp del poll anterior y `didSwitch=true`; `handover_count` es la cantidad de esos, `outage_duration_ms` es la suma de sus `durationNs` convertida a milisegundos. Requiere que el extractor guarde el timestamp del último poll entre invocaciones — alcance de implementación de la Semana 10 (`src/acquisition/`, todavía no escrito), no de este ADR.
+
+### Derivación en el mock
+
+`StarlinkMockAgent` ya calcula `handover_event` por tick. Se expone como:
+`handover_count = 1 if handover_event else 0`;
+`outage_duration_ms = uniform(200, 1200) if handover_event else 0.0` — rango calibrado contra las duraciones reales observadas en el relevamiento del lab (`eventLog` real: cortes de ~220 ms a ~1180 ms), no un valor inventado.
+
+### Pros y Contras
+
+| **Aspecto** | **PRO ✅ / CONTRA ⚠️** | **Detalle** |
+| --- | --- | --- |
+| **Panel dedicado en Grafana** | ✅ PRO | Permite un panel de eventos de handover independiente del de latencia/jitter, sin depender de heurísticas de picos. |
+| **Correlación cuantitativa** | ✅ PRO | `outage_duration_ms` da una medida directa del costo real del handover en tiempo de corte, no solo su ocurrencia. |
+| **Calibración de ADR-06** | ✅ PRO | Los rangos observados en la antena real (`didSwitch`/`eventLog`) sirven de referencia concreta para calibrar `CHAOS_PROFILE: HANDOVER_HEAVY`, en vez de parámetros elegidos a ciegas. |
+| **Estado entre polls en el extractor real** | ⚠️ CONTRA | Es la primera vez que el extractor necesita memoria entre invocaciones (timestamp del último poll). Mitigado: alcance acotado a esta única responsabilidad, no cambia el resto del diseño stateless de `get_status`. |
+| **Dos columnas nuevas en `network_metrics`** | ⚠️ CONTRA | Hypertable ya en producción eventualmente — agregar columnas es seguro (no requiere migración destructiva, ver nota de `docs/06_DER.md` §3.1), pero sigue siendo cambio de esquema compartido con el consumer de Fede. |
+
+## ADR-17 — Reemplazo de `snr_db` por `snr_low`: SNR Numérico No Disponible en Firmware Real
+
+| **Atributo** | **Valor** |
+| --- | --- |
+| **ID** | ADR-17 |
+| **Estado** | Propuesto |
+| **Fecha** | Agosto 2026 |
+| **Depende de** | ADR-01 |
+| **Impacta en** | ADR-06, ADR-11, ADR-13 |
+
+### Contexto y Motivación
+
+`StarlinkMetrics.snr_db` (`src/mock_starlink/schema.py`) se definió en Semana 1 como float
+en decibelios, asumiendo que el gRPC de la terminal expone un SNR numérico — supuesto
+razonable en ese momento (firmwares antiguos de Starlink sí lo exponían, y así lo
+documentaba la referencia de la comunidad `starlink-grpc-tools`), pero nunca verificado
+contra hardware real hasta ahora.
+
+El relevamiento del 04/08/2026 (`docs/PROGRESS.md` §Semana 10, antena con `apiVersion: 42`,
+software `2026.07.19.mr82648`) confirmó que el `get_status` real **no expone ningún campo
+numérico de SNR**. En su lugar, `dishGetStatus` trae dos booleanos: `isSnrAboveNoiseFloor`
+e `isSnrPersistentlyLow`. Esto rompe directamente la exigencia de ADR-01/`CLAUDE.md` §1.1 de
+que el mock y el hardware real sean intercambiables 1:1 (mismo tópico, misma morfología de
+paquete): el mock puede seguir generando un `snr_db` sintético indefinidamente, pero el
+extractor real jamás tendría de dónde sacar ese valor.
+
+### Alternativas Consideradas
+
+| **Aspecto** | **Alt. A — Mantener `snr_db` nullable, real siempre `null`** | **Alt. B — `snr_low: bool` ✅** | **Alt. C — Ambos booleanos (`snr_low` + `snr_above_floor`)** |
+| --- | --- | --- | --- |
+| Fidelidad a la API real | ⚠️ El campo existe en el esquema pero es un valor sintético que el hardware real no puede producir jamás — no es "a veces null", es "siempre null en producción" | ✅ Mapea 1:1 con `isSnrPersistentlyLow`, campo real y estable del firmware actual | ✅ También mapea 1:1, con ambos indicadores |
+| Cumple ADR-01 (equivalencia mock↔real) | ⚠️ Viola la equivalencia: el mock produce algo que el real nunca producirá | ✅ Mock y real generan/mapean el mismo campo | ✅ Igual que B |
+| Utilidad analítica adicional | — | — | ⚠️ `isSnrAboveNoiseFloor` es casi redundante con lo que ya capturan `packet_loss_pct`/`is_obstructed` ante un corte total de señal — no aporta una señal nueva relevante para Grafana |
+| Simplicidad del esquema | ✅ Sin cambios | ✅ Un campo booleano, mismo nivel de simplicidad que `is_obstructed` | ⚠️ Dos campos booleanos con solape conceptual, sin justificar el costo extra |
+| Costo de migración (schema/DER/mock/tests) | ✅ Ninguno | ⚠️ Cambio de tipo incompatible: requiere bump de `SCHEMA_VERSION` (1.0→1.1) | ⚠️ Igual que B, más un campo extra sin ganancia clara |
+
+### Decisión
+
+**✅ Decisión: Alternativa B — Reemplazar `snr_db: Optional[float]` por `snr_low: Optional[bool]`**
+
+`snr_low` mapea directamente `isSnrPersistentlyLow` del `get_status` real. `True` indica
+señal persistentemente baja (degradación sostenida, no un pico transitorio). Se descarta
+modelar también `isSnrAboveNoiseFloor` (Alt. C) por su solape con `packet_loss_pct`/
+`is_obstructed` — un campo booleano alcanza y mantiene el esquema simple, consistente con
+el criterio ya aplicado en ADR-16 (preferir el mínimo de campos que capture la señal real
+sin redundancia).
+
+**Cambio de tipo incompatible → bump de `SCHEMA_VERSION` a `1.1`.** A diferencia de ADR-16
+(agregar campos nuevos es compatible hacia atrás, un consumer viejo simplemente los
+ignora), reemplazar un `float` por un `bool` en el mismo nombre de campo no lo es — un
+consumer que todavía espera `snr_db` numérico rompería de forma confusa ante un booleano.
+`StarlinkPayloadIn.check_schema_version` debe rechazar explícitamente `"1.0"` a partir de
+esta versión, en vez de fallar silenciosamente aguas abajo.
+
+**Semántica NULL**: igual que el resto de `metrics` — `NULL` si `get_status` no fue
+accesible; en el mock, `snr_low` es siempre no-nulo (el mock nunca modela "falla al leer la
+API interna" como escenario de caos separado, ver ADR-06).
+
+### Derivación en el extractor real
+
+`dishGetStatus.isSnrPersistentlyLow`, directo, sin transformar.
+
+### Derivación en el mock
+
+`StarlinkMockAgent` reemplaza el random walk gaussiano de `snr_db` por una probabilidad de
+`snr_low=True` calibrada por `CHAOS_PROFILE` (sube durante obstrucción/handover, igual que
+antes degradaba el valor numérico) — ver tabla `CHAOS_PARAMS` actualizada en el docstring de
+`src/mock_starlink/mock.py`.
+
+### Pros y Contras
+
+| **Aspecto** | **PRO ✅ / CONTRA ⚠️** | **Detalle** |
+| --- | --- | --- |
+| **Equivalencia mock↔real restaurada** | ✅ PRO | Es exactamente la garantía que ADR-01/`CLAUDE.md` §1.1 exige y que `snr_db` float rompía en silencio. |
+| **Pérdida de granularidad** | ⚠️ CONTRA | Se pierde la escala continua en dB que tenía el mock — pero era sintética, nunca reflejó una medición real posible. |
+| **Panel de Grafana a rehacer** | ⚠️ CONTRA | El panel de obstrucción que hoy no grafica `snr_db` como serie separada pasa a superponer `snr_low` como marcador 0/1, igual patrón que `is_obstructed`. |
+| **Bump de `SCHEMA_VERSION`** | ⚠️ CONTRA (mitigado) | Único cambio de versión de esquema hasta ahora — documentado como el primer caso real de incompatibilidad, valida que el mecanismo de `check_schema_version` funciona como se diseñó. |
+
+## ADR-18 — Exposición de `alignmentStats`: Orientación Física de la Antena en el Esquema de Telemetría
+
+| **Atributo** | **Valor** |
+| --- | --- |
+| **ID** | ADR-18 |
+| **Estado** | Propuesto |
+| **Fecha** | Agosto 2026 |
+| **Depende de** | ADR-01 |
+| **Impacta en** | ADR-06, ADR-11, ADR-13 |
+
+### Contexto y Motivación
+
+Durante el relevamiento del 04/08/2026, el director pidió explícitamente evaluar exponer en
+Grafana los datos de `dishGetStatus.alignmentStats` (ya capturados sin usar en
+`get_status_full.json`, ver `docs/PROGRESS.md` §Semana 10): `tiltAngleDeg`,
+`boresightAzimuthDeg`, `boresightElevationDeg`, `attitudeEstimationState`,
+`attitudeUncertaintyDeg`, `desiredBoresightAzimuthDeg`, `desiredBoresightElevationDeg`.
+
+Encaja directamente con el objetivo central del proyecto (`CLAUDE.md` §1): correlacionar
+clima/entorno físico con performance de red. La desviación entre posición real
+(`boresightAzimuthDeg`/`boresightElevationDeg`) y objetivo
+(`desiredBoresightAzimuthDeg`/`desiredBoresightElevationDeg`), o un `tiltAngleDeg` que se
+corre con el viento, es un correlato físico-ambiental directo (ej. viento fuerte
+desalineando la antena → picos de latencia) — no es scope creep, es una instancia concreta
+del objetivo del PI, no una funcionalidad nueva sin relación.
+
+### Alternativas Consideradas
+
+| **Aspecto** | **Alt. A — Sub-objeto `alignment` anidado** | **Alt. B — Campos planos en `metrics` ✅** | **Alt. C — No implementar (fuera de alcance)** |
+| --- | --- | --- | --- |
+| Consistencia con `network_metrics` (DER) | ⚠️ La hypertable es plana por naturaleza (columnas SQL) — un sub-objeto en el payload obliga al consumer a aplanarlo igual antes del INSERT, sin ninguna ganancia | ✅ Mapeo directo payload→columna, mismo patrón que el resto de `metrics` | — |
+| Costo de implementación | ⚠️ Requiere lógica de aplanado extra en `src/consumer/db.py` | ✅ Ninguno adicional sobre lo que ya hace `NetHealthDB.insert` | ✅ Ninguno |
+| Valor para el objetivo del PI | ✅ | ✅ | ⚠️ Descarta un correlato físico-ambiental directo pedido explícitamente por el director |
+| Separación de ciclos de vida (payload) | ✅ Aísla campos "experimentales" del resto de `metrics`, similar al argumento de ADR-01 para separar envelope de `metrics` | ⚠️ Mezclados con el resto de campos de red — pero `metrics` ya es "todo lo que sabe la antena sobre sí misma", no solo red pura (ej. `is_obstructed` tampoco es una métrica de red) | — |
+
+### Decisión
+
+**✅ Decisión: Alternativa B — Campos planos en `metrics`, sin sub-objeto anidado**
+
+Se agregan seis campos opcionales a `StarlinkMetrics`:
+
+- `tilt_angle_deg`, `boresight_azimuth_deg`, `boresight_elevation_deg`,
+  `desired_boresight_azimuth_deg`, `desired_boresight_elevation_deg`,
+  `attitude_uncertainty_deg` (todos `float`, grados).
+
+**Se descarta `attitudeEstimationState`** (enum string de estado del algoritmo de
+estimación de actitud, ej. `ATTITUDE_ESTIMATION_STATE_STABLE`): no tiene uso analítico
+directo para el objetivo de correlación del PI — es metadato interno del algoritmo de
+alineación, no una medida física correlacionable con clima. Queda registrado como
+alternativa rechazada (Apéndice B) para no volver a evaluarlo sin justificación nueva.
+
+**Límite de alcance explícito** (mismo criterio que ADR-16): se expone la orientación física
+observable de la antena, información oficial de la API. No se intenta inferir mecanismos
+internos del algoritmo de tracking — seguiría fuera de alcance de `CLAUDE.md` §1.1.
+
+### Derivación en el extractor real
+
+`dishGetStatus.alignmentStats.{tiltAngleDeg, boresightAzimuthDeg, boresightElevationDeg,
+desiredBoresightAzimuthDeg, desiredBoresightElevationDeg, attitudeUncertaintyDeg}`,
+directos, sin transformar.
+
+### Derivación en el mock
+
+`StarlinkMockAgent` modela un random walk lento para `boresight_azimuth/elevation_deg`
+alrededor de un `desired_boresight_*` fijo por nodo, con la desviación agrandándose durante
+`handover_event`/obstrucción (viento/movimiento físico simulado) — ver `CHAOS_PARAMS`
+actualizado en `src/mock_starlink/mock.py`.
+
+### Pros y Contras
+
+| **Aspecto** | **PRO ✅ / CONTRA ⚠️** | **Detalle** |
+| --- | --- | --- |
+| **Correlato físico-ambiental directo** | ✅ PRO | Pedido explícito del director, encaja con el objetivo central del PI sin expandir su alcance. |
+| **Panel nuevo en Grafana** | ✅ PRO | Tilt/azimuth/elevación vs. tiempo, con overlay de desviación real vs. deseada — insumo directo para la campaña de medición de Semana 22. |
+| **Seis columnas nuevas en `network_metrics`** | ⚠️ CONTRA | Mismo criterio de ADR-16: agregar columnas a una hypertable es seguro (no requiere migración destructiva), pero es el ADR con más columnas nuevas de una sola vez del proyecto. |
+| **Sin impacto en `SCHEMA_VERSION`** | ✅ PRO | A diferencia de ADR-17, son campos nuevos (compatibles hacia atrás) — no fuerza el bump por sí solo, aunque se aplica igual porque ADR-17 se implementa en el mismo pasaje. |
+
 # APÉNDICES
 
 ## Apéndice A — Mapa de Dependencias entre ADRs
 
-El siguiente grafo muestra las relaciones de dependencia entre las 15 decisiones documentadas. Una flecha ADR-X → ADR-Y indica que ADR-Y depende de la decisión tomada en ADR-X.
+El siguiente grafo muestra las relaciones de dependencia entre las 18 decisiones documentadas. Una flecha ADR-X → ADR-Y indica que ADR-Y depende de la decisión tomada en ADR-X.
 
 | **ADR Base** | **ADRs que dependen de él** |
 | --- | --- |
-| ADR-01 (Serialización JSON+Pydantic) | ADR-04, ADR-06, ADR-07, ADR-08, ADR-11 |
+| ADR-01 (Serialización JSON+Pydantic) | ADR-04, ADR-06, ADR-07, ADR-08, ADR-11, ADR-16, ADR-17, ADR-18 |
 | ADR-02 (Sensor BME280 digital) | ADR-03, ADR-05, ADR-07 |
 | ADR-03 (ESP32 como Gateway) | ADR-04, ADR-05, ADR-07 |
 | ADR-04 (MQTT + ORM) | ADR-09, ADR-10, ADR-12 |
 | ADR-05 (Python + C++) | ADR-06, ADR-07, ADR-08, ADR-09, ADR-12 |
+| ADR-06 (Mock Starlink Random Walk) | ADR-16, ADR-17, ADR-18 |
 | ADR-09 (Mosquitto MQTT) | ADR-10, ADR-12 |
 | ADR-10 (Database per Service) | ADR-11, ADR-12, ADR-13 |
 | ADR-11 (TimescaleDB) | ADR-12, ADR-13 |
@@ -967,6 +1223,11 @@ Este apéndice consolida las alternativas que fueron evaluadas seriamente pero n
 | Instalación directa (Bare Metal) | ADR-12 | Síndrome 'works on my machine'. Migración a nube manual y propensa a errores. |
 | Frontend React/Vue a medida | ADR-13 | Semanas de desarrollo UI sin valor directo para la investigación de redes del PI. |
 | Placeholder estático (imagen JPG) | ADR-15 | No valida el stream de video real ni el impacto en el ancho de banda de las mediciones. |
+| Booleano `is_handover` (handover) | ADR-16 | Colapsa a un bit por medición; pierde multiplicidad de handovers en la ventana de polling y no permite panel de conteo agregado en Grafana. |
+| Mantener `snr_db` nullable, real siempre `null` | ADR-17 | El hardware real nunca podría producir un valor no-nulo — rompe la equivalencia mock↔real 1:1 de ADR-01 de forma permanente, no ocasional. |
+| Ambos booleanos (`snr_low` + `snr_above_floor`) | ADR-17 | `isSnrAboveNoiseFloor` es casi redundante con `packet_loss_pct`/`is_obstructed` ante un corte total de señal; no justifica el campo extra. |
+| Sub-objeto `alignment` anidado en el payload | ADR-18 | `network_metrics` es plana por naturaleza (columnas SQL); anidar obliga al consumer a aplanar sin ninguna ganancia real. |
+| Exponer `attitudeEstimationState` | ADR-18 | Enum string de estado interno del algoritmo de tracking, sin uso analítico directo para el objetivo de correlación clima-red del PI. |
 
 ## Comments
 

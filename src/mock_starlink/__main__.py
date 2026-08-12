@@ -9,12 +9,11 @@ de errores de conexión/publicación.
 
 import asyncio
 import json
-import logging
 import os
-import sys
-import time
 
 import paho.mqtt.client as mqtt
+
+from common import connect_with_retry, setup_logging
 
 from .mock import CHAOS_PROFILES, StarlinkMockAgent
 
@@ -22,52 +21,12 @@ TOPIC_METRICS = "starlink/metrics/{node_id}"
 TOPIC_STATUS = "system/status/{node_id}"
 
 
-class JsonLogFormatter(logging.Formatter):
-    """Formatter mínimo sin dependencias nuevas: una línea JSON por log."""
-
-    def format(self, record: logging.LogRecord) -> str:
-        payload = {
-            "level": record.levelname,
-            "msg": record.getMessage(),
-            "logger": record.name,
-            "time": self.formatTime(record, "%Y-%m-%dT%H:%M:%S%z"),
-        }
-        for key in ("node_id", "topic", "rc"):
-            if hasattr(record, key):
-                payload[key] = getattr(record, key)
-        return json.dumps(payload)
-
-
-def _setup_logging() -> logging.Logger:
-    logger = logging.getLogger("mock_starlink")
-    logger.setLevel(logging.INFO)
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(JsonLogFormatter())
-    logger.addHandler(handler)
-    return logger
-
-
 def _status_payload(node_id: str, status: str) -> str:
     return json.dumps({"node_id": node_id, "source": "starlink_mock", "status": status})
 
 
-def _connect_with_retry(client: mqtt.Client, host: str, port: int, logger: logging.Logger) -> None:
-    delay = 1.0
-    while True:
-        try:
-            client.connect(host, port, keepalive=60)
-            return
-        except OSError as exc:
-            logger.warning(
-                "no se pudo conectar al broker, reintentando",
-                extra={"rc": str(exc)},
-            )
-            time.sleep(delay)
-            delay = min(delay * 2, 30.0)
-
-
 def main() -> None:
-    logger = _setup_logging()
+    logger = setup_logging("mock_starlink")
 
     mqtt_host = os.environ.get("MQTT_HOST", "localhost")
     mqtt_port = int(os.environ.get("MQTT_PORT", "1883"))
@@ -103,7 +62,7 @@ def main() -> None:
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
 
-    _connect_with_retry(client, mqtt_host, mqtt_port, logger)
+    connect_with_retry(client, mqtt_host, mqtt_port, logger)
     client.loop_start()
 
     logger.info(

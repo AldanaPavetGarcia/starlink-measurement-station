@@ -28,7 +28,7 @@ class FakeDB:
 
 def payload_valido(**overrides):
     base = {
-        "schema_version": "1.0",
+        "schema_version": "1.1",
         "node_id": "lit-01",
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "metrics": {
@@ -37,9 +37,17 @@ def payload_valido(**overrides):
             "packet_loss_pct": 0.8,
             "throughput_down_bps": 185340000,
             "throughput_up_bps": 12450000,
-            "snr_db": 9.2,
+            "snr_low": False,
             "is_obstructed": False,
             "satellite_count": 14,
+            "handover_count": 0,
+            "outage_duration_ms": 0.0,
+            "tilt_angle_deg": 2.1,
+            "boresight_azimuth_deg": 184.3,
+            "boresight_elevation_deg": 51.7,
+            "desired_boresight_azimuth_deg": 184.0,
+            "desired_boresight_elevation_deg": 52.0,
+            "attitude_uncertainty_deg": 0.3,
         },
     }
     base.update(overrides)
