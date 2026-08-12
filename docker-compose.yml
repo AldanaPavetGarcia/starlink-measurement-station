@@ -37,6 +37,27 @@ services:
       TIME_WARP_FACTOR: ${TIME_WARP_FACTOR:-1}
     profiles: [mocks, stress]
 
+  # Semana 10 (CLAUDE.md §1.1): extractor real, reemplaza a mock_starlink
+  # contra la antena física (192.168.100.1:9200). Perfil "real" propio, NO
+  # "mocks" -- nunca deben correr los dos productores del mismo tópico a la
+  # vez. No probado contra hardware real todavía (sin acceso presencial al
+  # LIT en esta sesión, ver docs/PROGRESS.md §Semana 10).
+  acquisition:
+    build:
+      context: .
+      dockerfile: Dockerfile.acquisition
+    image: starlink-acquisition:dev
+    container_name: starlink-acquisition
+    restart: unless-stopped
+    network_mode: host  # necesita alcanzar 192.168.100.1 (red de la antena), no la red bridge de Docker
+    environment:
+      MQTT_HOST: ${MQTT_HOST:-localhost}
+      MQTT_PORT: ${MQTT_PORT:-1883}
+      STARLINK_NODE_ID: ${STARLINK_NODE_ID:-lit-cordoba-01}
+      DISH_GRPC_ADDR: ${DISH_GRPC_ADDR:-192.168.100.1:9200}
+      POLL_INTERVAL_S: ${POLL_INTERVAL_S:-60}
+    profiles: [real]
+
   # ADR-10/ADR-11: instancia TimescaleDB propia del dominio Starlink,
   # independiente de meteo_db (que Fede todavía no levantó). Imagen pinneada
   # (nunca :latest en producción, ADR-12), verificada con `docker pull`. Sin
@@ -107,9 +128,58 @@ services:
       STARLINK_DB_PASSWORD: ${STARLINK_DB_PASSWORD:-starlink_dev_password}
     profiles: [mocks, stress]
 
+  # Semana 9 (CLAUDE.md §1.1): backend FastAPI (docs/07_API_REST.md).
+  # Endpoints /health, /metrics/starlink*, /nodes*, /ingest/starlink -- los de
+  # dominio meteo (Fede) no se montan todavía. Publicado a la intranet del
+  # LIT (no solo localhost) según la tabla de exposición de puertos de
+  # ADR-14 ("Backend FastAPI | 8000 | ⚠️ Expuesto a la intranet del LIT --
+  # acceso para integración y consultas ad-hoc del equipo de investigación
+  # desde la red local"). Distinto de Grafana (✅ expuesto públicamente): acá
+  # es solo intranet, protegido además por X-API-Key (ADR-14 "Medidas de
+  # Seguridad Adicionales" pide filtrado de IP a nivel de firewall/router del
+  # LIT para esto -- fuera del alcance de docker-compose, ver README.md).
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    image: starlink-backend:dev
+    container_name: starlink-backend
+    restart: unless-stopped
+    depends_on:
+      broker:
+        condition: service_healthy
+      starlink_db:
+        condition: service_healthy
+      station_config_db:
+        condition: service_healthy
+    environment:
+      MQTT_HOST: broker
+      MQTT_PORT: 1883
+      STARLINK_DB_HOST: starlink_db
+      STARLINK_DB_PORT: 5432
+      STARLINK_DB_NAME: ${STARLINK_DB_NAME:-starlink_health}
+      STARLINK_DB_USER: ${STARLINK_DB_USER:-starlink_app}
+      STARLINK_DB_PASSWORD: ${STARLINK_DB_PASSWORD:-starlink_dev_password}
+      STATION_CONFIG_DB_HOST: station_config_db
+      STATION_CONFIG_DB_PORT: 5432
+      STATION_CONFIG_DB_NAME: ${STATION_CONFIG_DB_NAME:-station_config}
+      STATION_CONFIG_DB_USER: ${STATION_CONFIG_DB_USER:-station_config_app}
+      STATION_CONFIG_DB_PASSWORD: ${STATION_CONFIG_DB_PASSWORD:-station_config_dev_password}
+      # Sin default "seguro" real a propósito -- BACKEND_API_KEY es un secreto,
+      # no una contraseña de DB de desarrollo. El valor de acá es solo para no
+      # romper `docker compose up` sin .env configurado; cambiarlo siempre
+      # antes de cualquier despliegue real (docs/07_API_REST.md §2.1: generar
+      # con `python -c "import secrets; print(secrets.token_hex(32))"`).
+      BACKEND_API_KEY: ${BACKEND_API_KEY:-change_me_backend_api_key_dev_only}
+      ENABLE_INGEST_ENDPOINT: ${ENABLE_INGEST_ENDPOINT:-false}
+    ports:
+      - "${BACKEND_PORT:-8000}:8000"
+    profiles: [mocks, stress]
+
   # Semana 8 (CLAUDE.md §1.1): dashboard "Red Starlink" (ADR-13). Único
-  # servicio con puerto expuesto al host a propósito (ADR-14). Provisioning
-  # como código: datasource + dashboard JSON se cargan solos al arrancar.
+  # servicio expuesto públicamente a propósito (ADR-14) -- backend arriba se
+  # publica solo en localhost, no hacia afuera. Provisioning como código:
+  # datasource + dashboard JSON se cargan solos al arrancar.
   grafana:
     image: grafana/grafana-oss:11.3.1
     container_name: starlink-grafana
