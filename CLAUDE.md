@@ -48,14 +48,23 @@ la integración con el módulo de Fede ni con el resto de la pila.
 ### Alcance técnico del módulo Starlink
 
 - Extracción de datos desde la antena (Dishy McFlatface) vía su servidor gRPC local
-  (`192.168.100.1:9200`), usando Protobuf nativo (ver ADR-01). Referencia de la comunidad:
-  repositorio `starlink-grpc-tools` (Sparky8512, GitHub).
+  (`192.168.100.1:9200`), usando Protobuf nativo (ver ADR-01). **Enmienda de campo (relevamiento
+  04-06/08/2026, semana 10):** la antena expone server reflection, así que la extracción real
+  se hace con `grpcurl` (subprocess) contra esa reflection en vez de compilar bindings
+  `grpcio`+`.proto` propios — evita vendorizar los `.proto` propietarios de Starlink. Ver
+  `src/acquisition/grpc_client.py` y candidato a enmienda formal de ADR-01. Referencia de la
+  comunidad para el mapeo de campos: repositorio `starlink-grpc-tools` (Sparky8512, GitHub).
 - Conversión Protobuf → dict Python → validación Pydantic (`StarlinkPayloadIn`) → JSON
   (ADR-01). **No** introducir Protobuf ni otro formato binario aguas abajo de este punto.
-- Esquema del paquete (campos clave): `latency_ms`, `jitter_ms`, `packet_loss_pct`,
-  `throughput_down_bps`, `throughput_up_bps`, `snr_db`, `is_obstructed`, `satellite_count`,
-  `schema_version` — debe coincidir exactamente con `docs/03_SRS.md` §5.1 y `docs/06_DER.md`
-  (`network_metrics`). Cualquier cambio de esquema se propaga a ambos documentos.
+- Esquema del paquete (campos clave, `schema_version` "1.1"): `latency_ms`, `jitter_ms`,
+  `packet_loss_pct`, `throughput_down_bps`, `throughput_up_bps`, `snr_low` (booleano,
+  reemplaza a `snr_db` desde 1.1 — ADR-17), `is_obstructed`, `satellite_count`,
+  `handover_count`, `outage_duration_ms` (ADR-16), y los 6 campos planos de `alignmentStats`
+  (`tilt_angle_deg`, `boresight_azimuth_deg`, `boresight_elevation_deg`,
+  `desired_boresight_azimuth_deg`, `desired_boresight_elevation_deg`,
+  `attitude_uncertainty_deg` — ADR-18) — debe coincidir exactamente con `docs/03_SRS.md` §5.1
+  y `docs/06_DER.md` (`network_metrics`). Cualquier cambio de esquema se propaga a ambos
+  documentos.
 - Publicación en el tópico MQTT `starlink/metrics/<node_id>`, QoS 1.
 - Mock stateful con Random Walk + inyección de caos (obstrucciones, handovers, microcortes) —
   ADR-06 — empaquetado como microservicio Docker independiente (ADR-07), parametrizable con
