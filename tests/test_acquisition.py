@@ -1,13 +1,13 @@
 """
 Tests de src/acquisition/: las funciones puras de mapeo (starlink_extractor)
-contra JSON sintético que imita la estructura documentada en el relevamiento
-del 04/08/2026 (docs/PROGRESS.md §Semana 10), y grpc_client con
-subprocess.run mockeado (sin ejecutar grpcurl real).
+contra JSON sintético, y grpc_client con subprocess.run mockeado (sin
+ejecutar grpcurl real).
 
-⚠️ Estos fixtures son sintéticos, no los JSON crudos reales de la antena
-(`~/starlink-relevamiento/*.json`, solo en la RPi5 del LIT) -- confirmar
-campo a campo en la próxima visita presencial antes de dar el extractor por
-validado end-to-end. Ver advertencia en starlink_extractor.py.
+Los nombres y rangos de campo del fixture (`isSnrAboveNoiseFloor`, ausencia
+de `obstructionStats.currentlyObstructed`/uso de `fractionObstructed`,
+`boresightAzimuthDeg` en rango firmado -180..180) fueron confirmados contra
+la antena real en el LIT el 12/08/2026 -- ver la cabecera de
+starlink_extractor.py para el detalle completo.
 """
 
 import subprocess
@@ -26,13 +26,15 @@ STATUS_FIXTURE = {
         "popPingLatencyMs": 24.5,
         "downlinkThroughputBps": "668000",  # protobuf int64 como string
         "uplinkThroughputBps": "173000",
-        "isSnrPersistentlyLow": False,
-        "obstructionStats": {"currentlyObstructed": False},
+        "isSnrAboveNoiseFloor": True,  # snr_low = not isSnrAboveNoiseFloor (confirmado contra antena real)
+        # currentlyObstructed NO existe en el firmware real (confirmado 12/08/2026) --
+        # solo fractionObstructed (fracción continua 0-1). is_obstructed = fraction > 0.
+        "obstructionStats": {"fractionObstructed": 0.0},
         "alignmentStats": {
             "tiltAngleDeg": 2.1,
-            "boresightAzimuthDeg": 184.3,
+            "boresightAzimuthDeg": -175.7,  # rango firmado -180..180, confirmado 12/08/2026
             "boresightElevationDeg": 51.7,
-            "desiredBoresightAzimuthDeg": 184.0,
+            "desiredBoresightAzimuthDeg": -176.0,
             "desiredBoresightElevationDeg": 52.0,
             "attitudeUncertaintyDeg": 0.3,
         },
@@ -62,11 +64,30 @@ def test_map_status_campos_directos():
     assert m["latency_ms"] == 24.5
     assert m["throughput_down_bps"] == 668000.0
     assert m["throughput_up_bps"] == 173000.0
-    assert m["is_obstructed"] is False
     assert m["snr_low"] is False
+    assert m["is_obstructed"] is False
     assert m["tilt_angle_deg"] == 2.1
-    assert m["boresight_azimuth_deg"] == 184.3
-    assert m["desired_boresight_azimuth_deg"] == 184.0
+    assert m["boresight_azimuth_deg"] == -175.7
+    assert m["desired_boresight_azimuth_deg"] == -176.0
+
+
+def test_map_status_snr_low_es_el_inverso_de_snr_above_noise_floor():
+    """ADR-17 asumía isSnrPersistentlyLow; el firmware real solo tiene
+    isSnrAboveNoiseFloor (semántica invertida) -- confirmado 12/08/2026."""
+    fixture = {"dishGetStatus": {"isSnrAboveNoiseFloor": False}}
+    assert map_status(fixture)["snr_low"] is True
+
+
+def test_map_status_is_obstructed_true_con_fraccion_positiva():
+    """El firmware real no tiene obstructionStats.currentlyObstructed, solo
+    fractionObstructed (fracción continua) -- umbral bajo (>0) a propósito,
+    cualquier obstrucción detectada cuenta (confirmado 12/08/2026)."""
+    fixture = {"dishGetStatus": {"obstructionStats": {"fractionObstructed": 0.0006}}}
+    assert map_status(fixture)["is_obstructed"] is True
+
+
+def test_map_status_is_obstructed_none_sin_obstruction_stats():
+    assert map_status({"dishGetStatus": {}})["is_obstructed"] is None
 
 
 def test_map_status_satellite_count_siempre_none():

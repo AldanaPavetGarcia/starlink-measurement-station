@@ -84,9 +84,9 @@ def test_alignment_fields_se_mantienen_dentro_de_rango(): # ADR-18
     agent = StarlinkMockAgent("lit-cordoba-01", chaos_profile="STORM", rng=random.Random(10))
     for _ in range(1000):
         m = agent.generate_payload()["metrics"]
-        assert 0.0 <= m["boresight_azimuth_deg"] <= 360.0
+        assert -180.0 <= m["boresight_azimuth_deg"] <= 180.0
         assert 0.0 <= m["boresight_elevation_deg"] <= 90.0
-        assert 0.0 <= m["desired_boresight_azimuth_deg"] <= 360.0
+        assert -180.0 <= m["desired_boresight_azimuth_deg"] <= 180.0
         assert 0.0 <= m["desired_boresight_elevation_deg"] <= 90.0
         assert 0.0 <= m["tilt_angle_deg"] <= 90.0
         assert m["attitude_uncertainty_deg"] >= 0.0

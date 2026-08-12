@@ -20,15 +20,21 @@ Corresponde a la definición final documentada en el informe de relevamiento:
 schema_version 1.1 (ADR-16/17/18, agosto 2026, relevamiento contra hardware
 real en el LIT):
 - `snr_db` (float) reemplazado por `snr_low` (bool, ADR-17) — el firmware
-  real (apiVersion 42) no expone SNR numérico, solo `isSnrPersistentlyLow`/
-  `isSnrAboveNoiseFloor`. Cambio de tipo incompatible con 1.0, por eso
-  `check_schema_version` rechaza explícitamente la versión vieja.
+  real (apiVersion 42) no expone SNR numérico, solo `isSnrAboveNoiseFloor`
+  (confirmado en campo el 12/08/2026; `isSnrPersistentlyLow`, asumido en el
+  relevamiento del 04/08, no existe). `snr_low = not isSnrAboveNoiseFloor`.
+  Cambio de tipo incompatible con 1.0, por eso `check_schema_version`
+  rechaza explícitamente la versión vieja.
 - `handover_count`/`outage_duration_ms` agregados (ADR-16), derivados de
   `get_history.dishGetHistory.outages[].didSwitch` real.
 - Campos de `alignmentStats` agregados (ADR-18, pedido del director):
   `tilt_angle_deg`, `boresight_azimuth_deg`, `boresight_elevation_deg`,
   `desired_boresight_azimuth_deg`, `desired_boresight_elevation_deg`,
-  `attitude_uncertainty_deg`.
+  `attitude_uncertainty_deg`. Los dos campos de azimuth usan rango firmado
+  (-180..180, no brújula 0-360) — corregido el 12/08/2026 tras confirmar
+  contra la antena real que el firmware devuelve valores como -179.99922;
+  la convención 0-360 asumida originalmente en ADR-18 nunca se validó
+  contra hardware y quedaba falsa en la práctica.
 """
 
 from datetime import datetime, timezone
@@ -70,16 +76,18 @@ class StarlinkMetrics(BaseModel):
     )
     snr_low: Optional[bool] = Field(
         default=None,
-        description="isSnrPersistentlyLow del get_status real (ADR-17). Reemplaza "
-                    "snr_db (float) desde schema_version 1.1 -- el firmware real no "
-                    "expone SNR numérico. Null si la API interna de la antena no "
-                    "está accesible (DER NULL='S')."
+        description="`not isSnrAboveNoiseFloor` del get_status real (ADR-17). "
+                    "Reemplaza snr_db (float) desde schema_version 1.1 -- el "
+                    "firmware real no expone SNR numérico. Null si la API interna "
+                    "de la antena no está accesible (DER NULL='S')."
     )
     is_obstructed: Optional[bool] = Field(
         default=None,
-        description="Basado en currently_obstructed. obstruction_detail se "
-                    "descartó por estar deprecado en firmwares recientes. Null si "
-                    "la API interna de la antena no está accesible (DER NULL='S')."
+        description="`obstructionStats.fractionObstructed > 0` del get_status real "
+                    "-- el firmware no expone un booleano currently_obstructed "
+                    "(confirmado 12/08/2026), solo la fracción continua de "
+                    "muestras recientes obstruidas. Null si la API interna de la "
+                    "antena no está accesible (DER NULL='S')."
     )
     satellite_count: Optional[int] = Field(
         default=None, ge=0,
@@ -103,9 +111,12 @@ class StarlinkMetrics(BaseModel):
         description="alignmentStats.tiltAngleDeg (ADR-18). Null si no disponible."
     )
     boresight_azimuth_deg: Optional[float] = Field(
-        default=None, ge=0, le=360,
+        default=None, ge=-180, le=180,
         description="alignmentStats.boresightAzimuthDeg, apuntamiento real (ADR-18). "
-                    "Convención de brújula (0-360, no signado). Null si no disponible."
+                    "Rango firmado (-180..180), confirmado contra la antena real el "
+                    "12/08/2026 -- la convención de brújula 0-360 asumida originalmente "
+                    "nunca se validó contra hardware y era incorrecta. Null si no "
+                    "disponible."
     )
     boresight_elevation_deg: Optional[float] = Field(
         default=None, ge=0, le=90,
@@ -113,10 +124,10 @@ class StarlinkMetrics(BaseModel):
                     "(ADR-18). Null si no disponible."
     )
     desired_boresight_azimuth_deg: Optional[float] = Field(
-        default=None, ge=0, le=360,
+        default=None, ge=-180, le=180,
         description="alignmentStats.desiredBoresightAzimuthDeg, apuntamiento "
-                    "objetivo (ADR-18). Convención de brújula (0-360, no signado). "
-                    "Null si no disponible."
+                    "objetivo (ADR-18). Rango firmado (-180..180), ver "
+                    "boresight_azimuth_deg. Null si no disponible."
     )
     desired_boresight_elevation_deg: Optional[float] = Field(
         default=None, ge=0, le=90,
@@ -202,9 +213,9 @@ if __name__ == "__main__":  # pragma: no cover
             "handover_count": 0,
             "outage_duration_ms": 0.0,
             "tilt_angle_deg": 2.1,
-            "boresight_azimuth_deg": 184.3,
+            "boresight_azimuth_deg": -175.7,
             "boresight_elevation_deg": 51.7,
-            "desired_boresight_azimuth_deg": 184.0,
+            "desired_boresight_azimuth_deg": -176.0,
             "desired_boresight_elevation_deg": 52.0,
             "attitude_uncertainty_deg": 0.3,
         },

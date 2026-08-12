@@ -89,7 +89,7 @@ class StarlinkMockAgent:
         # nodo (la antena lo recalcula según su posición/órbita objetivo, acá
         # se fija en la instanciación) y apuntamiento real, que hace random
         # walk alrededor del deseado.
-        self._desired_azimuth_deg = self.rng.uniform(0.0, 360.0)
+        self._desired_azimuth_deg = self.rng.uniform(-180.0, 180.0)
         self._desired_elevation_deg = self.rng.uniform(30.0, 70.0)
         self._boresight_azimuth_deg = self._desired_azimuth_deg
         self._boresight_elevation_deg = self._desired_elevation_deg
@@ -175,7 +175,7 @@ class StarlinkMockAgent:
         self._boresight_azimuth_deg += (
             self._desired_azimuth_deg - self._boresight_azimuth_deg
         ) * 0.1
-        self._boresight_azimuth_deg = max(0.0, min(360.0, self._boresight_azimuth_deg))
+        self._boresight_azimuth_deg = max(-180.0, min(180.0, self._boresight_azimuth_deg))
 
         self._boresight_elevation_deg += rng.uniform(-deviation_scale, deviation_scale)
         self._boresight_elevation_deg += (

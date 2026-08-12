@@ -55,11 +55,11 @@ CREATE TABLE IF NOT EXISTS network_metrics (
     CONSTRAINT chk_netmet_tilt
         CHECK (tilt_angle_deg IS NULL OR (tilt_angle_deg >= 0 AND tilt_angle_deg <= 90)),
     CONSTRAINT chk_netmet_boresight_azimuth
-        CHECK (boresight_azimuth_deg IS NULL OR (boresight_azimuth_deg >= 0 AND boresight_azimuth_deg <= 360)),
+        CHECK (boresight_azimuth_deg IS NULL OR (boresight_azimuth_deg >= -180 AND boresight_azimuth_deg <= 180)),
     CONSTRAINT chk_netmet_boresight_elevation
         CHECK (boresight_elevation_deg IS NULL OR (boresight_elevation_deg >= 0 AND boresight_elevation_deg <= 90)),
     CONSTRAINT chk_netmet_desired_azimuth
-        CHECK (desired_boresight_azimuth_deg IS NULL OR (desired_boresight_azimuth_deg >= 0 AND desired_boresight_azimuth_deg <= 360)),
+        CHECK (desired_boresight_azimuth_deg IS NULL OR (desired_boresight_azimuth_deg >= -180 AND desired_boresight_azimuth_deg <= 180)),
     CONSTRAINT chk_netmet_desired_elevation
         CHECK (desired_boresight_elevation_deg IS NULL OR (desired_boresight_elevation_deg >= 0 AND desired_boresight_elevation_deg <= 90)),
     CONSTRAINT chk_netmet_attitude_uncertainty

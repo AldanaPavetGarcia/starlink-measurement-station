@@ -126,15 +126,15 @@ objeto anidado **`metrics`** con las métricas de red propiamente dichas (ADR-01
 | packet_loss_pct | float / null | Porcentaje de paquetes perdidos (0–100) | 0.5 |
 | throughput_down_bps | integer / null | Velocidad de bajada medida (bits por segundo) | 187300000 |
 | throughput_up_bps | integer / null | Velocidad de subida medida (bits por segundo) | 22100000 |
-| snr_low | boolean / null | Señal persistentemente baja, reportado por la API interna de la terminal (`isSnrPersistentlyLow`, si disponible). Reemplaza `snr_db` desde v1.1 — el firmware real no expone SNR numérico (ver ADR-17) | false |
+| snr_low | boolean / null | Señal persistentemente baja, derivado como `not isSnrAboveNoiseFloor` de la API interna de la terminal (si disponible; `isSnrPersistentlyLow`, asumido originalmente, no existe en el firmware real — confirmado 12/08/2026). Reemplaza `snr_db` desde v1.1 — el firmware real no expone SNR numérico (ver ADR-17) | false |
 | is_obstructed | boolean / null | Obstrucción del campo visual (FOV) reportada por la API interna (si disponible) | false |
 | satellite_count | integer / null | Cantidad de satélites en vista (si disponible) | 14 |
 | handover_count | integer / null | Cantidad de eventos de handover satelital detectados desde la medición anterior (si disponible). 0 es el valor normal cuando no hubo handovers; null solo si la medición falló (ver ADR-16) | 0 |
 | outage_duration_ms | float / null | Milisegundos totales de corte asociados a esos handovers, en el mismo intervalo (si disponible). 0 es el valor normal; null solo si la medición falló (ADR-16) | 0.0 |
 | tilt_angle_deg | float / null | Inclinación física de la antena, en grados (si disponible, ver ADR-18) | 2.1 |
-| boresight_azimuth_deg | float / null | Azimuth real de apuntamiento, en grados (ADR-18) | 184.3 |
+| boresight_azimuth_deg | float / null | Azimuth real de apuntamiento, en grados, rango firmado -180..180 (ADR-18) | -175.7 |
 | boresight_elevation_deg | float / null | Elevación real de apuntamiento, en grados (ADR-18) | 51.7 |
-| desired_boresight_azimuth_deg | float / null | Azimuth objetivo calculado por la antena, en grados (ADR-18) | 184.0 |
+| desired_boresight_azimuth_deg | float / null | Azimuth objetivo calculado por la antena, en grados, rango firmado -180..180 (ADR-18) | -176.0 |
 | desired_boresight_elevation_deg | float / null | Elevación objetivo calculada por la antena, en grados (ADR-18) | 52.0 |
 | attitude_uncertainty_deg | float / null | Incertidumbre del algoritmo de estimación de actitud, en grados (ADR-18) | 0.3 |
 
@@ -157,9 +157,9 @@ Ejemplo de paquete completo:
     "handover_count": 0,
     "outage_duration_ms": 0.0,
     "tilt_angle_deg": 2.1,
-    "boresight_azimuth_deg": 184.3,
+    "boresight_azimuth_deg": -175.7,
     "boresight_elevation_deg": 51.7,
-    "desired_boresight_azimuth_deg": 184.0,
+    "desired_boresight_azimuth_deg": -176.0,
     "desired_boresight_elevation_deg": 52.0,
     "attitude_uncertainty_deg": 0.3
   }

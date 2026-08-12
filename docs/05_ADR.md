@@ -53,7 +53,7 @@ Este documento es de carácter vivo: cada ADR puede ser superado por uno posteri
 | **ADR-14** | Postura de Seguridad y Exposición de Puertos | Observabilidad | Zero Trust local: solo puerto Grafana expuesto externamente + filtrado de IP | **Propuesto** |
 | **ADR-15** | Mock de Videomonitoreo (Streaming) | Observabilidad | Microservicio Flask/MJPEG a 5 FPS sobre placeholder estático | **Propuesto** |
 | **ADR-16** | Exposición de Eventos de Handover Satelital | Esquema / HW real | Campos agregados `handover_count`/`outage_duration_ms` en `metrics` | **Propuesto** |
-| **ADR-17** | Reemplazo de `snr_db` por `snr_low` | Esquema / HW real | Booleano `snr_low` (← `isSnrPersistentlyLow`) sobre float inexistente en firmware real | **Propuesto** |
+| **ADR-17** | Reemplazo de `snr_db` por `snr_low` | Esquema / HW real | Booleano `snr_low` (← `not isSnrAboveNoiseFloor`; `isSnrPersistentlyLow` no existe en el firmware real, hallazgo 12/08) sobre float inexistente en firmware real | **Propuesto** |
 | **ADR-18** | Exposición de `alignmentStats` (Orientación Física de la Antena) | Esquema / HW real | Campos planos de tilt/azimuth/elevación en `metrics`, sin sub-objeto anidado | **Propuesto** |
 
 # FASE 1 — Diseño y Definición de Contratos
@@ -147,9 +147,9 @@ El JSON del paquete Starlink tiene dos niveles, no es una tabla plana de campos 
     "handover_count": 0,
     "outage_duration_ms": 0.0,
     "tilt_angle_deg": 2.1,
-    "boresight_azimuth_deg": 184.3,
+    "boresight_azimuth_deg": -175.7,
     "boresight_elevation_deg": 51.7,
-    "desired_boresight_azimuth_deg": 184.0,
+    "desired_boresight_azimuth_deg": -176.0,
     "desired_boresight_elevation_deg": 52.0,
     "attitude_uncertainty_deg": 0.3
   }
@@ -1082,7 +1082,8 @@ API interna" como escenario de caos separado, ver ADR-06).
 
 ### Derivación en el extractor real
 
-`dishGetStatus.isSnrPersistentlyLow`, directo, sin transformar.
+`not dishGetStatus.isSnrAboveNoiseFloor` — ver hallazgo de campo abajo. (La decisión
+original de este ADR asumía mapeo directo desde `isSnrPersistentlyLow`; corregido.)
 
 ### Derivación en el mock
 
@@ -1090,6 +1091,22 @@ API interna" como escenario de caos separado, ver ADR-06).
 `snr_low=True` calibrada por `CHAOS_PROFILE` (sube durante obstrucción/handover, igual que
 antes degradaba el valor numérico) — ver tabla `CHAOS_PARAMS` actualizada en el docstring de
 `src/mock_starlink/mock.py`.
+
+### Hallazgo de campo (12/08/2026) — `isSnrPersistentlyLow` no existe en el firmware real
+
+La Decisión de este ADR (arriba) eligió mapear `snr_low` directo desde `isSnrPersistentlyLow`
+y descartó `isSnrAboveNoiseFloor` (Alt. C) por redundancia — basado en el relevamiento del
+04/08/2026, que reportaba ambos booleanos presentes en `dishGetStatus`. En la sesión
+presencial del 12/08/2026 en el LIT, `grpcurl` contra la antena real (mismo hardware,
+`softwareVersion 2026.07.27.mr83192.1`) mostró que **`isSnrPersistentlyLow` no está presente
+en la respuesta real** — solo `isSnrAboveNoiseFloor`. El relevamiento del 04/08 estaba
+equivocado en ese punto específico (posible confusión con la documentación de la comunidad
+`starlink-grpc-tools`, que sí lista `isSnrPersistentlyLow` para otras variantes de firmware).
+
+Corregido en `src/acquisition/starlink_extractor.py` y `src/mock_starlink/schema.py`:
+`snr_low = not isSnrAboveNoiseFloor` (inversión semántica — `isSnrAboveNoiseFloor=true`
+significa señal buena). No cambia la Alternativa elegida (sigue siendo un único booleano,
+Alt. B) ni el `SCHEMA_VERSION` — solo el campo gRPC de origen.
 
 ### Pros y Contras
 
@@ -1167,6 +1184,22 @@ directos, sin transformar.
 alrededor de un `desired_boresight_*` fijo por nodo, con la desviación agrandándose durante
 `handover_event`/obstrucción (viento/movimiento físico simulado) — ver `CHAOS_PARAMS`
 actualizado en `src/mock_starlink/mock.py`.
+
+### Hallazgo de campo (12/08/2026) — corrección de rango de `boresightAzimuthDeg`
+
+La decisión original de este ADR (agosto 2026, relevamiento del 04/08) asumía convención de
+brújula (0-360, no signado) para `boresight_azimuth_deg`/`desired_boresight_azimuth_deg`, sin
+haberla validado todavía contra la antena real. En la sesión presencial del 12/08/2026 en el
+LIT, `grpcurl` contra `dishGetStatus` real devolvió valores como `boresightAzimuthDeg:
+-179.98016` — el firmware usa rango firmado (-180..180), no brújula 0-360. La convención
+0-360 nunca fue correcta, era una suposición sin validar que rompía la validación Pydantic en
+cada poll con azimuth negativo (esencialmente siempre, dado que el apuntamiento observado
+oscila cerca del límite ±180).
+
+Corregido en `src/mock_starlink/schema.py` (`ge=-180, le=180`), `docs/06_DER.md` (CHECK
+constraint y `services/db/init_starlink_health.sql`), y `docs/07_API_REST.md`. El mock
+(`src/mock_starlink/mock.py`) también se ajustó para generar valores en el rango correcto. Sin
+impacto en `SCHEMA_VERSION` (el tipo del campo no cambia, solo su rango válido).
 
 ### Pros y Contras
 

@@ -1,33 +1,43 @@
 """
 Mapeo gRPC (protobuf-JSON vía grpcurl) -> campos de StarlinkMetrics (ADR-01).
 Funciones puras (dict de entrada, dict/tupla de salida), sin tocar red --
-testeables sin la antena real, contra JSON sintético que imita la estructura
-documentada en el relevamiento del 04/08/2026 (`docs/PROGRESS.md` §Semana 10).
+testeables sin la antena real, contra JSON sintético.
 
-⚠️ Sin acceso presencial a la RPi5/antena en esta sesión, este mapeo no se
-validó contra los JSON crudos reales (`~/starlink-relevamiento/*.json` en la
-RPi5) -- solo contra la estructura y nombres de campo tal como quedaron
-documentados a mano en el relevamiento. Confirmar campo a campo en la
-próxima visita al LIT antes de dar por cerrado el extractor (`__main__.py`
-ya deja este módulo aislado justo para que ese chequeo sea rápido: correr
-`map_status`/`derive_jitter_loss`/`count_handovers` contra los JSON reales
-guardados y comparar a mano).
+Validado campo a campo contra la antena real en el LIT el 12/08/2026 (sesión
+presencial, `grpcurl` vía SSH a la RPi5 -- ver `docs/PROGRESS.md` §Semana 10).
+El relevamiento previo del 04/08 asumía `isSnrPersistentlyLow` y
+`obstructionStats.currentlyObstructed`; ninguno de los dos existe en este
+firmware (`softwareVersion: 2026.07.27.mr83192.1`) -- corregido acá para
+`snr_low` e `is_obstructed`. `boresightAzimuthDeg`/`desiredBoresightAzimuthDeg`
+vinieron en rango firmado (-180..180, ej. -179.99922), no en la convención de
+brújula 0-360 asumida originalmente -- corregido en `schema.py` (ADR-18,
+rango ahora -180..180) tras confirmar contra la antena real.
 
-Mapeo confirmado en el relevamiento:
+Mapeo confirmado contra la antena real:
 - latency_ms          <- dishGetStatus.popPingLatencyMs (directo)
 - throughput_down_bps  <- dishGetStatus.downlinkThroughputBps (directo)
 - throughput_up_bps    <- dishGetStatus.uplinkThroughputBps (directo)
-- is_obstructed        <- dishGetStatus.obstructionStats.currentlyObstructed
+- is_obstructed        <- `obstructionStats.fractionObstructed > 0` -- el
+                           firmware no expone un booleano currently_obstructed
+                           (confirmado ausente 12/08/2026), solo la fracción
+                           continua de muestras recientes obstruidas. Umbral
+                           bajo (>0, no >0.01) a propósito: cualquier
+                           obstrucción detectada cuenta como señal de alerta
+                           temprana, misma semántica que "currently obstructed".
 - satellite_count      <- siempre None (confirmado ausente en get_status Y
                            get_diagnostics en este hardware/firmware, dos
                            corridas independientes -- no es un bug del mapeo)
-- snr_low (ADR-17)     <- dishGetStatus.isSnrPersistentlyLow
-- alignmentStats (ADR-18) <- dishGetStatus.alignmentStats.* (directo)
-- jitter_ms/packet_loss_pct <- derivados de dishGetHistory (no son campos
-  nativos del gRPC, confirmado derivables pero la fórmula exacta no se
-  validó contra datos reales, ver advertencia arriba)
+- snr_low (ADR-17)     <- `not dishGetStatus.isSnrAboveNoiseFloor` (el campo
+                           real es el inverso semántico de lo que asumía
+                           ADR-17; `isSnrPersistentlyLow` no existe)
+- alignmentStats (ADR-18) <- dishGetStatus.alignmentStats.* (directo, pero
+  ver advertencia de rango de azimuth arriba)
+- jitter_ms/packet_loss_pct <- derivados de dishGetHistory (stdev de
+  popPingLatencyMs y promedio de popPingDropRate*100 respectivamente,
+  confirmados presentes y con esa forma en la antena real)
 - handover_count/outage_duration_ms (ADR-16) <- dishGetHistory.outages[]
   filtrados por startTimestampNs posterior al último poll y didSwitch=true
+  (estructura confirmada contra la antena real)
 """
 
 from __future__ import annotations
@@ -54,13 +64,16 @@ def map_status(status: dict) -> dict:
     obstruction = s.get("obstructionStats", {}) or {}
     alignment = s.get("alignmentStats", {}) or {}
 
+    snr_above_floor = s.get("isSnrAboveNoiseFloor")
+    fraction_obstructed = _num(obstruction.get("fractionObstructed"))
+
     return {
         "latency_ms": _num(s.get("popPingLatencyMs")),
         "throughput_down_bps": _num(s.get("downlinkThroughputBps")),
         "throughput_up_bps": _num(s.get("uplinkThroughputBps")),
-        "is_obstructed": obstruction.get("currentlyObstructed"),
+        "is_obstructed": (fraction_obstructed > 0) if fraction_obstructed is not None else None,
         "satellite_count": None,
-        "snr_low": s.get("isSnrPersistentlyLow"),
+        "snr_low": (not snr_above_floor) if snr_above_floor is not None else None,
         "tilt_angle_deg": _num(alignment.get("tiltAngleDeg")),
         "boresight_azimuth_deg": _num(alignment.get("boresightAzimuthDeg")),
         "boresight_elevation_deg": _num(alignment.get("boresightElevationDeg")),
