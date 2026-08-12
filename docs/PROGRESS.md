@@ -642,16 +642,22 @@ tras un `docker system prune` consciente.
       en `docker-compose.yml` bajo perfil **`real`** propio (nunca junto con
       `mocks` — dos productores del mismo tópico a la vez rompería
       ADR-01), `network_mode: host` (necesita alcanzar `192.168.100.1`).
-- [ ] Correr el script extractor sobre el Raspberry Pi 5 real
-- [ ] Validar el flujo completo end-to-end con hardware físico —
-      **próximos pasos concretos para la visita al LIT**: (1) copiar
-      `~/starlink-relevamiento/*.json` de la RPi5 a `tests/fixtures/grpc/`
-      de este repo y comparar a mano contra `STATUS_FIXTURE`/
-      `HISTORY_FIXTURE` de `tests/test_acquisition.py` — confirmar que la
-      estructura asumida coincide campo a campo; (2) `docker compose
-      --profile real up --build` sobre la RPi5 y verificar con
-      `mosquitto_sub` que el payload publicado es indistinguible en forma
-      del que publica el mock; (3) recién ahí arrancar las 72h de CA-01.
+- [x] Correr el script extractor sobre el Raspberry Pi 5 real — 12/08/2026,
+      ver sesión abajo. Confirmado `grpcurl` preinstalado en la RPi5 y
+      conectividad real a la antena (`192.168.100.1:9200`, server
+      reflection responde). Capturado `get_status`/`get_history` reales vía
+      SSH y corrido `build_metrics()`/`StarlinkPayloadIn.model_validate()`
+      contra esos datos (offline, sin correr `__main__.py` como proceso
+      continuo todavía).
+- [x] (parcial) Validar el mapeo del extractor contra datos reales de la
+      antena — **validación offline completa** (mapeo campo a campo +
+      validación Pydantic end-to-end, ver sesión del 12/08 abajo), pero
+      **todavía no la pila Docker completa corriendo en la RPi5** (Docker
+      Engine no está instalado ahí, ver hallazgo abajo) ni las 72h de CA-01.
+- [ ] Instalar Docker Engine en la RPi5, `docker compose --profile real up
+      --build` ahí, verificar con `mosquitto_sub` que el payload publicado
+      es indistinguible en forma del que publica el mock, y recién ahí
+      arrancar las 72h de CA-01/CA-02 con `scripts/monitor_ca02.py`.
 - [ ] Confirmar con Fede que ambos módulos funcionan simultáneamente sobre el RPi5
 
 > 🔗 Milestone: fin del desarrollo desacoplado del hardware.
@@ -902,6 +908,64 @@ falta para calibrar `packet_loss_pct`/`jitter_ms` y, en particular, para dar
 valores realistas al perfil `CHAOS_PROFILE: HANDOVER_HEAVY` del mock (ADR-06):
 esta data real da una referencia concreta de frecuencia y duración de handovers
 para no inventar los parámetros del random walk a ciegas.
+
+### 2026-08-12 — Sesión en el lab: validación de campo del extractor real contra la antena
+
+**Contexto:** primera sesión con acceso presencial simultáneo a RPi5 + antena +
+tiempo para tocar código (a diferencia del 04/08, exploratorio). Antes de esto,
+`src/acquisition/` estaba escrito pero nunca corrido contra hardware real.
+
+**Conectividad confirmada:** SSH a la RPi5 (`leonode-rpi`, `raspberrypi`,
+172.18.147.143) funcional. `grpcurl` preinstalado. `grpcurl -plaintext
+192.168.100.1:9200 list` responde con `SpaceX.API.Device.Device` — la antena
+está en Bypass Mode y alcanzable, tal como asume `grpc_client.py`.
+
+**Metodología:** en vez de instalar Docker en la RPi5 y correr la pila
+completa (Docker Engine no está instalado ahí todavía — ver pendiente abajo),
+se capturó `get_status`/`get_history` reales vía `grpcurl` sobre SSH y se
+corrieron `build_metrics()` + `StarlinkPayloadIn.model_validate()` de forma
+offline contra esos datos, en la máquina de desarrollo. Validación más rápida
+para una sesión acotada, y suficiente para encontrar y corregir los mismatches
+reales sin arriesgar tocar la config de la RPi5 compartida con Fede.
+
+**Tres mismatches encontrados entre lo asumido (relevamiento 04/08, ADR-16/17/18
+tal como quedaron implementados el 11/08) y el firmware real
+(`softwareVersion: 2026.07.27.mr83192.1`):**
+
+| Campo | Asumido | Real | Corrección |
+| --- | --- | --- | --- |
+| `snr_low` | `dishGetStatus.isSnrPersistentlyLow` | No existe. Solo `isSnrAboveNoiseFloor` (semántica invertida) | `snr_low = not isSnrAboveNoiseFloor` |
+| `is_obstructed` | `obstructionStats.currentlyObstructed` | No existe. Solo `fractionObstructed` (fracción continua 0-1) | `is_obstructed = fractionObstructed > 0` |
+| `boresight_azimuth_deg` / `desired_boresight_azimuth_deg` | Convención de brújula 0-360 | Rango firmado -180..180 (ej. `-179.99922`) | Rango del campo cambiado a -180..180 en todo el esquema compartido |
+
+El tercero era el más grave: rompía `StarlinkPayloadIn.model_validate()` en
+cada poll con azimuth negativo, es decir **descartaba el payload real
+completo**, no solo un campo — nunca hubiera llegado nada a la DB con la
+antena real conectada.
+
+**Corregido y verificado:** `src/acquisition/starlink_extractor.py`,
+`src/mock_starlink/schema.py` (rango de azimuth), `src/mock_starlink/mock.py`
+(generación del mock en el rango correcto), `services/db/init_starlink_health.sql`
+(CHECK constraint), y los 4 documentos autoritativos (SRS/ADR/DER/API REST).
+ADR-17 y ADR-18 llevan una sección "Hallazgo de campo (12/08/2026)" nueva
+documentando la corrección sin reescribir la decisión original. Revalidado
+`build_metrics()` contra el payload real capturado: pasa
+`StarlinkPayloadIn.model_validate()` de punta a punta (antes fallaba). 183/183
+tests, 94.79% cobertura.
+
+**Pendiente para la próxima sesión en el lab** (no se hizo hoy, no se instaló
+nada en la RPi5 más allá de usar `grpcurl` de solo lectura):
+- Instalar Docker Engine + clonar el repo en la RPi5 (no estaba, `docker` no
+  encontrado) — coordinar con Fede si conviene hacerlo juntos, ya que
+  comparten el mismo RPi5.
+- `docker compose --profile real up --build` con `DISH_GRPC_ADDR` real, y
+  verificar con `mosquitto_sub` que el payload publicado por `acquisition`
+  llega al broker con la misma forma que el del mock.
+- Recién ahí arrancar la ventana de 72h de CA-01/CA-02 con
+  `scripts/monitor_ca02.py`.
+- Llevarle al director el hallazgo de `isSnrPersistentlyLow`/
+  `currentlyObstructed`/rango de azimuth como enmienda a confirmar en
+  ADR-17/ADR-18 (siguen "Propuesto").
 
 ## Semanas 11–12 — Suite de testing + CI `[IND]` ✅ COMPLETA (código; CI sin correr en GitHub real todavía)
 
