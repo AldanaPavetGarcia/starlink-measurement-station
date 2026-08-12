@@ -93,7 +93,7 @@ con el módulo de Fede o con la pila compartida — coordinar antes de tocar có
 | 8 | Dashboard Grafana conectado a `starlink_health_db`: paneles de latencia/jitter/pérdida, throughput, `satellite_count`/`is_obstructed` | [IND] |
 | 9 | Endpoints `GET /api/v1/metrics/starlink`, `/summary`, `/latest`; auth por API Key (`X-API-Key`); logging estructurado en extractor, consumer y backend | **[INT] — logging antes del hardware real** |
 | 10 | **Pasaje a hardware real**: reemplazar el mock por conexión gRPC real (`192.168.100.1:9200`), correr en RPi5, validar E2E físico, confirmar con Fede que ambos módulos conviven en el mismo RPi5 | **[HW] — fin del desarrollo desacoplado de hardware** |
-| 11–12 | Suites de integración (IT-01), `pytest-cov --cov-fail-under=80`, CI en GitHub Actions | [IND] |
+| 11–12 | Suites de integración (IT-01), `pytest-cov --cov-fail-under=90`, CI en GitHub Actions | [IND] |
 | 13–14 | Soporte a Fede en integración de APIs externas: no romper el esquema del consumer compartido, ajustar routing MQTT si hace falta | [INT — Fede lidera] |
 | 15–16 | Continuous Aggregates en TimescaleDB, reconexión automática del broker en el extractor, colaborar en postura Zero Trust (ADR-14) | [IND]+[INT] |
 | 17–18 | (Opcional/secundario) Colaborar en streaming de videomonitoreo, verificar que no compita por ancho de banda con las mediciones de red | [INT] |

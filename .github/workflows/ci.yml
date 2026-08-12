@@ -29,7 +29,7 @@ jobs:
       # PYTHONPATH=src:. -- "." además de "src" porque tests/backend_fakes.py
       # y tests/integration/conftest.py se importan como paquete `tests.*`
       # desde otros archivos de test (ver tests/test_backend_routers_db.py).
-      - name: pytest (unit, --cov-fail-under=80 vía pytest.ini/.coveragerc)
+      - name: pytest (unit, --cov-fail-under=90 vía pytest.ini/.coveragerc)
         run: PYTHONPATH=src:. pytest tests/ --ignore=tests/integration
 
   integration:
