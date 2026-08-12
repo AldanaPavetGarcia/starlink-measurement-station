@@ -8,6 +8,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+COPY src/common ./src/common
 COPY src/mock_starlink ./src/mock_starlink
 
 ENV PYTHONPATH=/app/src
