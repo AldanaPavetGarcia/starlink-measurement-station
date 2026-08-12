@@ -1,0 +1,21 @@
+# Microservicio Docker independiente del backend (ADR-07). Reusa
+# python:3.11-slim, multi-arch (amd64/arm64), igual que mock/consumer (ADR-05,
+# ADR-12). Copia src/mock_starlink y src/consumer porque POST /ingest/starlink
+# reusa StarlinkPayloadIn (ADR-01) y NetHealthDB/starlink_row en vez de
+# duplicar validación/INSERT -- ver src/backend/routers/ingest.py.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt requirements-consumer.txt requirements-backend.txt ./
+RUN pip install --no-cache-dir -r requirements-backend.txt
+
+COPY src/common ./src/common
+COPY src/mock_starlink ./src/mock_starlink
+COPY src/consumer ./src/consumer
+COPY src/backend ./src/backend
+
+ENV PYTHONPATH=/app/src
+ENV PYTHONUNBUFFERED=1
+
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8000"]
