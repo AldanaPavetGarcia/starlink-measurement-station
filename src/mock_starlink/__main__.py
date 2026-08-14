@@ -18,7 +18,11 @@ from common import connect_with_retry, setup_logging
 from .mock import CHAOS_PROFILES, StarlinkMockAgent
 
 TOPIC_METRICS = "starlink/metrics/{node_id}"
-TOPIC_STATUS = "system/status/{node_id}"
+# Enmienda 14/08/2026 (ADR-03/ADR-04): era "system/status/{node_id}", compartido
+# con el módulo de sensado ambiental -- dos productores de dominios distintos
+# bajo el mismo node_id se pisaban el mensaje retained entre sí (confirmado en
+# una prueba de integración en vivo con el mock de Fede, ver docs/PROGRESS.md).
+TOPIC_STATUS = "starlink/status/{node_id}"
 
 
 def _status_payload(node_id: str, status: str) -> str:

@@ -317,6 +317,38 @@ su confirmación en vez de la del director.
 
 ## Coordinación pendiente con Fede
 
+### Prueba en vivo — mock de Fede contra mi broker (14/8/2026, en el LIT)
+
+Primera prueba real de la "Duda #1" resuelta el 11/8 en la práctica: Fede apuntó su
+`MQTT_HOST` temporalmente (solo variable de entorno, sin tocar código, opción A ya
+anotada abajo) a mi `mosquitto-broker` (levantado standalone en mi laptop,
+`docker compose --profile mocks up -d broker`, `172.18.147.220:1883`, misma red del
+LIT). **Confirmado con `mosquitto_sub`: sus mensajes llegan.** Payload en
+`meteo/sensor/lit-cordoba-01` exactamente como documentado el 11/8 (`source` fijo
+`"local_sensor"`, distinción real en `producer: "mock_bme280"`, `schema_version
+"1.0"`, cada 60s, valores plausibles ~21°C/~62%HR/~1012hPa).
+
+**Hallazgo nuevo, más grave que la nota que Fede ya tenía en su README sobre
+`component`**: su mock y el mío publican al **mismo tópico exacto**
+`system/status/<node_id>` porque los dos usan `node_id=lit-cordoba-01` para la misma
+estación. No es solo que el valor de `component` difiera (`mock_bme280` vs.
+`starlink_mock`/`sensor_gateway`) — es que con mensajes **retained**, el último que
+publica pisa el retenido del otro módulo sin dejar rastro. Se vio en vivo: mi
+retained `{"source":"starlink_mock","status":"offline"}` fue pisado por el
+`online`/`offline` de su mock, en la misma sesión. Hoy, mirar
+`system/status/lit-cordoba-01` no te dice el estado de "la estación" — te dice el
+estado de *cualquiera de los dos módulos que haya publicado último*, indistinguible.
+
+**Decidido con Fede el mismo día y ya implementado de mi lado**: separar el tópico
+por dominio en vez de compartirlo plano, siguiendo el mismo esquema que ya usan los
+tópicos de datos (`starlink/metrics/<node_id>` vs. `meteo/sensor/<node_id>`) —
+`starlink/status/<node_id>` de mi lado, `meteo/status/<node_id>` del suyo. Resolver
+solo el valor de `component`/`source` dentro del mismo tópico no alcanzaba (seguía
+habiendo un único retained por tópico). Aplicado en `src/mock_starlink/__main__.py`,
+`src/acquisition/__main__.py`, y documentado como enmienda en ADR-03/ADR-04
+(`docs/05_ADR.md`) — ver detalle ahí. **Pendiente del lado de Fede**: actualizar su
+`will_set()` de `system/status/<node_id>` a `meteo/status/<node_id>`.
+
 ### Revisión del repo de Fede — `tesis-sensor-node` (11/8/2026)
 
 Repo confirmado: `github.com/BlastNeos/tesis-sensor-node`, rama `development`, 3
@@ -349,10 +381,14 @@ que había quedado abierta en la sesión del 6/8 (ver memoria
   en el ADR-01 de su lado (o en `EnvPayloadIn` cuando se escriba) antes de que
   `MeteoDB` intente mapear el campo equivocado.
 - **Inconsistencia que Fede mismo dejó anotada como pregunta abierta en su
-  README**: el campo `component` del mensaje de estado (LWT/heartbeat en
-  `system/status/<node_id>`) difiere entre su mock (`mock_bme280`) y su
-  firmware (`sensor_gateway`) — riesgo real de que se pisen el mensaje
-  retained si corren simultáneo con el mismo `node_id`.
+  README**: el campo `component` del mensaje de estado (LWT/heartbeat, hoy
+  `meteo/status/<node_id>` de su lado — ver enmienda del 14/08 más abajo)
+  difiere entre su mock (`mock_bme280`) y su firmware (`sensor_gateway`) —
+  riesgo real de que se pisen el mensaje retained si corren simultáneo con el
+  mismo `node_id`. **Sigue sin resolver incluso después de la enmienda del
+  14/08** — esa enmienda separó el tópico por dominio (Starlink vs. meteo),
+  no el choque mock-vs-firmware *dentro* del propio dominio de Fede, que es
+  un problema distinto y todavía suyo por cerrar.
 - **Su firmware ESP32 es un esqueleto sin validar contra hardware**
   (`firmware/esp32-bme280/`, WiFi/MQTT/NTP/sensor con backoff, estructuralmente
   completo) — su propio `test/README.md` admite "0 tests, ni siquiera de
@@ -394,12 +430,16 @@ que había quedado abierta en la sesión del 6/8 (ver memoria
   pero todavía no publica imagen a GHCR (sin CI configurado de su lado) — coordinar
   antes de que el `docker-compose.yml` de este repo intente referenciar la suya.
 - **Nomenclatura de tópicos**: `meteo/sensor/<node_id>` para BME280 (real y mock,
-  mismo tópico) y `system/status/<node_id>` para LWT/heartbeats. **Confirmado
-  independientemente el 11/8** al revisar su repo — su mock y su firmware ya usan
-  exactamente estos mismos nombres (`mocks/bme280/src/config.py`,
-  `firmware/esp32-bme280/include/AppConfig.h`), sin haber visto este documento. Ya
-  no es un punto abierto de nomenclatura — el problema real que queda es que su
-  broker es una instancia aislada (ver "Duda #1 resuelta" arriba), no el nombre del tópico.
+  mismo tópico). **Confirmado independientemente el 11/8** al revisar su repo — su
+  mock y su firmware ya usan exactamente este nombre (`mocks/bme280/src/config.py`,
+  `firmware/esp32-bme280/include/AppConfig.h`), sin haber visto este documento. El
+  problema real que queda es que su broker es una instancia aislada (ver "Duda #1
+  resuelta" arriba), no el nombre del tópico de métricas.
+  **Actualización 14/8**: el tópico de LWT/heartbeats **cambió** — era
+  `system/status/<node_id>` (único, compartido), pasó a `starlink/status/<node_id>`
+  de mi lado / `meteo/status/<node_id>` del lado de Fede (enmienda ADR-03/ADR-04, ver
+  arriba). Su mock/firmware todavía publican en el tópico viejo `system/status/<node_id>`
+  — falta que actualice su `will_set()` al nuevo `meteo/status/<node_id>` de su lado.
 - **Confirmar con Fede los valores por default que se completaron en ADR-02/ADR-03**
   (ver "Puntos abiertos... cerrados con Aldana" arriba): backoff exponencial del ESP32 y
   formato del mensaje LWT. Son parte de su firmware — necesitan su OK antes de darlos

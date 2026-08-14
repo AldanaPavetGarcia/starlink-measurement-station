@@ -92,7 +92,7 @@ solo levanta el broker:
 
   ```bash
   docker exec -it mosquitto-broker mosquitto_sub -t 'starlink/metrics/#' -v
-  docker exec -it mosquitto-broker mosquitto_sub -t 'system/status/#' -v
+  docker exec -it mosquitto-broker mosquitto_sub -t 'starlink/status/#' -v
   ```
 
 - **Bajar todo**: `docker compose --profile mocks down` (agregar `-v` para borrar
@@ -118,7 +118,8 @@ director/co-director.
 ## Mock Starlink
 
 Publica cada `60/TIME_WARP_FACTOR` segundos en `starlink/metrics/<node_id>` y anuncia
-su estado (online/offline, LWT) en `system/status/<node_id>`. Variables (`.env`):
+su estado (online/offline, LWT) en `starlink/status/<node_id>` (antes `system/status/<node_id>`,
+ver enmienda de ADR-03/ADR-04 del 14/08/2026 en `docs/05_ADR.md`). Variables (`.env`):
 
 | Variable | Default | Descripción |
 |---|---|---|

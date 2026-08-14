@@ -309,7 +309,7 @@ El ESP32 lee el BME280 vía I²C local, construye el paquete JSON (librería Ard
 
 ### Consecuencias e Implicaciones
 
-- El firmware del ESP32 incluye el mecanismo Last Will and Testament (LWT) de MQTT: si el ESP32 se cuelga, el broker emite automáticamente un mensaje de alerta en el tópico `system/status/<node_id>` (mismo esquema domain-first que el resto de los tópicos, ver ADR-04). Payload JSON: `{"node_id": "...", "source": "esp32_bme280|starlink_grpc|starlink_mock|...", "status": "offline"}`, `retain=true` (un nuevo suscriptor ve el último estado sin esperar el próximo heartbeat), QoS 1. Todo productor (real o mock) configura su propio LWT con este mismo formato al conectarse al broker.
+- Mecanismo de Last Will and Testament (LWT) de MQTT, compartido por todos los productores (real o mock, de cualquier módulo): si un productor se cuelga sin desconectarse limpiamente, el broker emite automáticamente un mensaje de alerta con `retain=true` (un nuevo suscriptor ve el último estado sin esperar el próximo heartbeat), QoS 1. **Enmienda 14/08/2026** (ver `docs/PROGRESS.md` → "Coordinación pendiente con Fede", prueba de integración en vivo con su mock): el tópico originalmente definido acá era único y compartido, `system/status/<node_id>` — se descubrió que dos productores de dominios distintos (`starlink_mock` y `mock_bme280` de Fede) publicando bajo el mismo `node_id` se pisaban el mensaje retained entre sí, porque MQTT solo retiene un mensaje por tópico. Corregido para seguir el mismo esquema domain-first que ya usan los tópicos de datos (`starlink/metrics/<node_id>` vs. `meteo/sensor/<node_id>`, ver ADR-04): **`starlink/status/<node_id>`** para productores del módulo Starlink (`starlink_mock`, `starlink_acquisition`) y **`meteo/status/<node_id>`** para productores del módulo ambiental (`esp32_bme280`, `mock_bme280`). Payload JSON sin cambios: `{"node_id": "...", "source": "esp32_bme280|starlink_grpc|starlink_mock|...", "status": "offline"}`. Todo productor configura su propio LWT con este formato, en el tópico de su dominio.
 
 - El tópico MQTT del ESP32 sigue la jerarquía definida: meteo/sensor/<node_id>.
 
@@ -368,17 +368,23 @@ La taxonomía de tópicos establece el enrutamiento semántico de todos los mens
 | starlink/metrics/<node_id> | Script gRPC Starlink (real o mock) | Consumer Router | starlink_health_db → hypertable network_metrics |
 | meteo/sensor/<node_id> | ESP32 + BME280 (real o mock) | Consumer Router | meteo_db → hypertable env_metrics |
 | meteo/external/<node_id> | Integrador API (Open-Meteo) | Consumer Router | meteo_db → hypertable env_metrics |
-| system/status/<node_id> | Cualquier servicio (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
+| starlink/status/<node_id> | Productores Starlink, real o mock (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
+| meteo/status/<node_id> | Productores ambientales, real o mock (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
 
 > Alineado con `docs/03_SRS.md` §5.1 (IF-01, IF-02, IF-03, RF-17), `docs/06_DER.md` y
 > `docs/08_Plan_QA.md` (UT-03, IT-01/IT-02) — esos cuatro documentos ya usaban esta
 > convención de forma consistente; esta tabla era la que estaba desactualizada. Nota:
 > `bme280_hardware`/`bme280_mock` se unifican en un solo tópico porque ADR-01 exige que
 > el hardware real y el mock sean intercambiables 1:1 sin cambios downstream (mismo
-> tópico, misma morfología de paquete). `system/status/<node_id>` sigue el mismo estilo
-> domain-first; no está cubierto por el SRS (es un tópico operativo, no de datos de
-> medición) pero no contradice RF-17, que solo obliga la jerarquía de los tres tópicos
-> de datos.
+> tópico, misma morfología de paquete). **Enmienda 14/08/2026**: `starlink/status/<node_id>`
+> y `meteo/status/<node_id>` reemplazan al tópico único `system/status/<node_id>` que
+> tenía esta tabla originalmente — no era realmente domain-first pese a lo que decía esta
+> nota, y una prueba de integración en vivo con el módulo de Fede confirmó que dos
+> productores de dominios distintos bajo el mismo `node_id` se pisaban el retained entre
+> sí (ver ADR-03, sección "Consecuencias e Implicaciones", y `docs/PROGRESS.md`). Ninguno
+> de los dos tópicos de status está cubierto por el SRS (son tópicos operativos, no de
+> datos de medición) pero no contradicen RF-17, que solo obliga la jerarquía de los tres
+> tópicos de datos.
 >
 > Se eliminó la fila `nodo/lit-01/net_health/iperf_test` (Script iPerf3 activo): no
 > está cubierta por el SRS ni por el "Alcance técnico" de `CLAUDE.md` §1.1 (telemetría
@@ -666,7 +672,7 @@ Mosquitto se despliega como contenedor Docker usando la imagen eclipse-mosquitto
 | --- | --- | --- |
 | QoS Level 1 (At least once) | Garantiza que ningún mensaje de telemetría se pierde si el consumer o el broker se reinicia transitoriamente. | qos=1 en todos los publish() y subscribe() |
 | Persistent Session (clean_session=False) | El broker retiene mensajes no entregados para el consumer cuando este se desconecta y los entrega al reconectar. | client.connect(...) con clean_session=False en el consumer |
-| Last Will and Testament (LWT) | Si un productor se cuelga sin desconectarse limpiamente, el broker publica automáticamente un mensaje de alerta en el tópico de estado del sistema. | client.will_set('system/status/<node_id>', ...) |
+| Last Will and Testament (LWT) | Si un productor se cuelga sin desconectarse limpiamente, el broker publica automáticamente un mensaje de alerta en el tópico de estado del sistema, separado por dominio (enmienda 14/08/2026, ver ADR-03/ADR-04). | client.will_set('starlink/status/<node_id>', ...) / client.will_set('meteo/status/<node_id>', ...) |
 | Retained Messages | El último valor de métricas clave queda retenido en el broker. Un nuevo suscriptor recibe inmediatamente el estado más reciente sin esperar el próximo ciclo. | retain=True en métricas de estado del sistema |
 
 ### Pros y Contras
@@ -1283,4 +1289,4 @@ Este apéndice consolida las alternativas que fueron evaluadas seriamente pero n
 [^c1] ALDANA MICAELA PAVET GARCÍA: Anticorrupción, acl — resuelto: agregado párrafo de framing ACL (Anti-Corruption Layer) en la Justificación de ADR-01.
 [^c3] ALDANA MICAELA PAVET GARCÍA: Definir — resuelto: parámetros de backoff exponencial definidos en ADR-03 (delay inicial 1s, factor x2, tope 60s, reintentos indefinidos).
 [^c0] ALDANA MICAELA PAVET GARCÍA: No es formato de serialización, es una estructura de datos — resuelto: reformulada la Decisión de ADR-01 para aclarar que el dict Python es una estructura en memoria, no un formato de serialización.
-[^c4] ALDANA MICAELA PAVET GARCÍA: Definir — resuelto: mensaje LWT definido en ADR-03 (`system/status/<node_id>`, payload JSON, retain=true, QoS 1); tópico alineado en la tabla de ADR-04.
+[^c4] ALDANA MICAELA PAVET GARCÍA: Definir — resuelto: mensaje LWT definido en ADR-03 (`starlink/status/<node_id>` / `meteo/status/<node_id>` desde la enmienda del 14/08/2026, antes `system/status/<node_id>`; payload JSON, retain=true, QoS 1); tópico alineado en la tabla de ADR-04.
