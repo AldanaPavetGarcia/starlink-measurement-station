@@ -179,7 +179,7 @@ Todos los endpoints excepto GET /api/v1/health requieren autenticación mediante
 | --- | --- |
 | **Header name** | X-API-Key |
 | **Valor** | Clave aleatoria generada con: python -c "import secrets; print(secrets.token_hex(32))" |
-| **Configuración** | Variable de entorno API_KEY en archivo .env (nunca en código fuente ni en repositorio Git) |
+| **Configuración** | Variable de entorno BACKEND_API_KEY en archivo .env (nunca en código fuente ni en repositorio Git) |
 | **Endpoint público** | GET /api/v1/health — no requiere X-API-Key (permite monitoreo externo de disponibilidad) |
 | **Respuesta si falla** | HTTP 401 Unauthorized — {"detail": "API key inválida o ausente", "code": "AUTH_FAILED"} |
 
@@ -190,7 +190,7 @@ Todos los endpoints excepto GET /api/v1/health requieren autenticación mediante
 
 ### **Implementación FastAPI (security.py)**
 
-| from fastapi import Security, HTTPException, status from fastapi.security.api_key import APIKeyHeader import os API_KEY_NAME = "X-API-Key" api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False) async def require_api_key(api_key: str = Security(api_key_header)):     """Dependency inyectable en todos los endpoints protegidos."""     expected = os.getenv("API_KEY")     if not expected:         raise RuntimeError("API_KEY no configurada en variables de entorno")     if api_key != expected:         raise HTTPException(             status_code=status.HTTP_401_UNAUTHORIZED,             detail={"detail": "API key inválida o ausente", "code": "AUTH_FAILED",                     "timestamp": datetime.utcnow().isoformat() + "Z"}         )     return api_key # Uso en un router: # @router.get("/metrics/starlink", dependencies=[Depends(require_api_key)]) |
+| from fastapi import Security, HTTPException, status from fastapi.security.api_key import APIKeyHeader import os API_KEY_NAME = "X-API-Key" api_key_header = APIKeyHeader(name=API_KEY_NAME, auto_error=False) async def require_api_key(api_key: str = Security(api_key_header)):     """Dependency inyectable en todos los endpoints protegidos."""     expected = os.getenv("BACKEND_API_KEY")     if not expected:         raise RuntimeError("BACKEND_API_KEY no configurada en variables de entorno")     if api_key != expected:         raise HTTPException(             status_code=status.HTTP_401_UNAUTHORIZED,             detail={"detail": "API key inválida o ausente", "code": "AUTH_FAILED",                     "timestamp": datetime.utcnow().isoformat() + "Z"}         )     return api_key # Uso en un router: # @router.get("/metrics/starlink", dependencies=[Depends(require_api_key)]) |
 | --- |
 
 ## **2.2 Evolución de Autenticación (Roadmap)**

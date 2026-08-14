@@ -108,6 +108,19 @@ def test_query_params_faltantes_devuelve_400_validation_error():
     assert resp.json()["code"] == "VALIDATION_ERROR"
 
 
+def test_validation_error_detail_no_filtra_paths_internos():
+    """Hallazgo 13/8/2026 (docs/PROGRESS.md): `str(RequestValidationError)`
+    en FastAPI 0.141/Starlette 1.6 incluye el path del archivo y línea del
+    handler dentro del contenedor -- una fuga de detalle interno (ADR-14).
+    El handler global arma el `detail` a partir de `exc.errors()` en cambio,
+    para dar un mensaje legible sin exponer la ruta del filesystem."""
+    resp = client.get("/api/v1/metrics/starlink", headers={"X-API-Key": API_KEY})
+    detail = resp.json()["detail"]
+    assert "File \"" not in detail
+    assert "src/backend" not in detail
+    assert "start" in detail and "end" in detail
+
+
 def test_start_posterior_a_end_devuelve_400_validation_error():
     resp = client.get(
         "/api/v1/metrics/starlink",

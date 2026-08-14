@@ -967,6 +967,72 @@ nada en la RPi5 más allá de usar `grpcurl` de solo lectura):
   `currentlyObstructed`/rango de azimuth como enmienda a confirmar en
   ADR-17/ADR-18 (siguen "Propuesto").
 
+### 2026-08-13 — Sesión en casa: endurecer el pipeline local con mocks
+
+**Contexto:** mismo día que la sesión del LIT de arriba, pero ya sin acceso a
+RPi5/antena (PRs #10/#11/#12 de esa sesión ya mergeados a `main`). Con la pila
+`--profile mocks` levantada localmente, foco en ejercitar el pipeline con
+`CHAOS_PROFILE` variados y en probar los endpoints del backend a fondo — no
+tocar el mock ni el dashboard (`services/grafana/dashboards/red_starlink.json`
+ya tenía los 7 paneles esperados, confirmado sin necesidad de editar nada ahí).
+
+**Caos verificado end-to-end (no solo a nivel unitario):** se corrió
+`mock_starlink` en tiempo real (`TIME_WARP_FACTOR=1`, no se usó backfill
+acelerado — arranca 30 días atrás por diseño de ADR-08 y no aporta a una
+sesión corta) con `CHAOS_PROFILE=STORM` y luego `HANDOVER_HEAVY`, verificando
+en `starlink_health_db` que efectivamente aparecen `is_obstructed=true`,
+`snr_low=true`, `packet_loss_pct` >5%, `handover_count`>0 y
+`outage_duration_ms`>0 — sin `ValidationError` ni errores de deserialización
+en los logs de `mock_starlink`/`consumer`. Los perfiles ya estaban cubiertos
+estadísticamente por `tests/test_mock.py` (UT-04-02, etc.); esto agrega la
+confirmación de que el pipeline completo (mock→broker→consumer→DB) los
+absorbe sin romperse, que un test unitario del mock no puede probar.
+`net_hourly`/`net_daily` se pueden poblar sin esperar el schedule de la
+Continuous Aggregate Policy (1h/1día) llamando manualmente a
+`CALL refresh_continuous_aggregate('net_hourly', NULL, NULL)` — útil para
+verificación puntual; en producción sigue refrescando solo por policy.
+
+**Bug real encontrado y corregido en el backend — fuga de path interno en
+errores 400:** `GET /metrics/starlink` sin `start`/`end` devolvía un `detail`
+que incluía el path del archivo y línea del handler dentro del contenedor
+(`File "/app/src/backend/routers/metrics_starlink.py", line 78, in
+get_starlink_metrics...`) en vez de un mensaje legible — `str(exc)` sobre el
+`RequestValidationError` en FastAPI 0.141/Starlette 1.6 arrastra ese detalle.
+Corregido en `src/backend/errors.py`
+(`validation_exception_handler`/`_format_validation_errors`): arma el
+`detail` desde `exc.errors()` en vez de `str(exc)`. No es una fuga grave hoy
+(entorno local, sin exponerse a internet — ADR-14 recién exige postura Zero
+Trust en el punto de exposición externa, que es Grafana, no el backend), pero
+sí un detalle interno que no correspondía en un `detail` público — regresión
+cubierta en `tests/test_backend_api.py::test_validation_error_detail_no_filtra_paths_internos`.
+
+**Drift de documentación encontrado y corregido:** `docs/07_API_REST.md`
+§2.1 documentaba el nombre de la variable de entorno de la API Key como
+`API_KEY` (en el snippet de `security.py` y en la tabla de configuración) —
+el código real (`src/backend/config.py`, `docker-compose.yml`, `.env.example`)
+siempre usó `BACKEND_API_KEY`. Corregido el doc para que coincida con el
+código real, sin cambiar comportamiento.
+
+**Endpoints ejercitados manualmente con `curl` contra la pila local**
+(`/health`, `/metrics/starlink` [+`/summary`, `/latest`], `/nodes`,
+`/nodes/{node_id}`, `POST /ingest/starlink` con `ENABLE_INGEST_ENDPOINT=false`
+por default): todos responden con el envelope y los códigos de
+`docs/07_API_REST.md` §3 (401 sin key / con key incorrecta, 404
+NODE_NOT_FOUND, 422 INGEST_DISABLED, 200 con el `status`/`version`/
+`page_info`/`data` esperados). No se dejó `ENABLE_INGEST_ENDPOINT=true` en
+`.env` al terminar.
+
+**No verificado visualmente (sin navegador en este entorno):** los paneles
+de Grafana no se revisaron por captura de pantalla — se verificó en cambio,
+vía SQL, que las queries `rawSql` de los 7 paneles (incluidos los 3 de
+ADR-16/18) devuelven filas no vacías y plausibles con los datos generados
+en esta sesión. Falta la revisión visual real en el navegador (pendiente
+para quien tenga la pila abierta en Grafana, http://localhost:3000).
+
+184/184 tests (183 + 1 nuevo), 94.71% cobertura — sigue ≥90%. Sin PR todavía
+para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
+`docs/07_API_REST.md`) — pendiente de rama + PR según el ruleset de `main`.
+
 ## Semanas 11–12 — Suite de testing + CI `[IND]` ✅ COMPLETA (código; CI sin correr en GitHub real todavía)
 
 - [x] Escribir/completar suites de integración (IT-01): mock → broker →

@@ -48,12 +48,29 @@ async def http_exception_handler(request: Request, exc: HTTPException) -> JSONRe
     )
 
 
+def _format_validation_errors(exc: Exception) -> str:
+    """Arma un `detail` legible a partir de `exc.errors()` (lista de dicts
+    {loc, msg, type} de Pydantic/FastAPI). `str(exc)` se evitó a propósito:
+    en FastAPI 0.141/Starlette 1.6 incluye el path del archivo y número de
+    línea del handler dentro del contenedor (ver docs/PROGRESS.md, hallazgo
+    12/8/2026) -- una fuga de detalle interno que no corresponde exponer en
+    una respuesta pública (ADR-14, postura Zero Trust)."""
+    errors = getattr(exc, "errors", None)
+    if not callable(errors):
+        return "parámetros de query inválidos"
+    parts = []
+    for e in errors():
+        loc = ".".join(str(part) for part in e.get("loc", ()) if part != "query")
+        parts.append(f"{loc}: {e.get('msg', 'inválido')}" if loc else e.get("msg", "inválido"))
+    return "; ".join(parts) if parts else "parámetros de query inválidos"
+
+
 async def validation_exception_handler(request: Request, exc: Exception) -> JSONResponse:
     """RequestValidationError de FastAPI (query params faltantes/mal
     tipados) -> VALIDATION_ERROR, no el 422 default de FastAPI."""
     return JSONResponse(
         status_code=status.HTTP_400_BAD_REQUEST,
-        content=_error_body("VALIDATION_ERROR", str(exc), request.url.path),
+        content=_error_body("VALIDATION_ERROR", _format_validation_errors(exc), request.url.path),
     )
 
 
