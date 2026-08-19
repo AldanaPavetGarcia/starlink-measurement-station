@@ -102,8 +102,19 @@ documentado en §Semana 10, implementación pendiente de la próxima visita).
 
 ## Pendiente — revisar con director/co-director
 
-Todos los ADR siguen "Propuesto" (nunca "Aceptado") — los siguientes puntos nuevos
-de esta sesión son candidatos concretos a confirmar, no solo formalidad:
+**Nota 19/08/2026 — intento de pasar el Estado de los 18 ADR a "Aceptado":** según
+Pavet García, el director (Henn) ya había dado por aprobados los 18 ADR de palabra en
+una instancia presencial previa al inicio del repo (~27/06/2026). Se intentó reflejar
+eso en `docs/05_ADR.md` (Estado: Propuesto → Aceptado) pero el hook de enforcement de
+`adr-check` lo bloqueó: esa skill exige explícitamente que el campo Estado a "Aceptado"
+lo escriba/confirme el director sobre el propio documento, no que se infiera de un
+relato en el commit — sin importar que la aprobación verbal haya sido real. Se revirtió
+y **los 18 ADR siguen en "Propuesto"** en `docs/05_ADR.md`. Queda como constancia
+informal acá, pendiente de que el director lo confirme por escrito (email, comentario en
+el doc, o editándolo él mismo) para poder aplicar el cambio.
+
+Los siguientes puntos nuevos de esta sesión son candidatos concretos a confirmar aparte,
+no solo formalidad:
 
 - **ADR-17 (`snr_db`→`snr_low`) y bump de `SCHEMA_VERSION` a 1.1**: es el primer
   cambio de tipo incompatible del esquema del proyecto. Vale la pena que el
@@ -1232,3 +1243,23 @@ para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
 - [ ] Correcciones finales sobre tu módulo según feedback del director/co-director
 
 > 🔗 Milestone: cierre del Proyecto Integrador.
+
+### 2026-08-19 — Intento de pasar el Estado de los 18 ADR a "Aceptado" (revertido)
+
+Se intentó cambiar el campo "Estado" de los 18 ADR (`docs/05_ADR.md`, tabla resumen §2
+y el atributo `Estado` de cada entrada individual) de "Propuesto" a "Aceptado", a pedido
+de Pavet García, quien indicó que el director (Henn) ya los había dado por aprobados en
+una instancia presencial previa al inicio del repo (~27/06/2026).
+
+El hook de enforcement de la skill `adr-check` bloqueó el commit: su regla es explícita
+("Nunca cambiar el campo 'Estado' de un ADR a 'Aceptado' — eso lo decide el director")
+y no distingue el motivo — el registro formal de "Aceptado" tiene que originarse en una
+acción explícita del director sobre el propio documento, no en un commit del agente que
+infiere la aprobación a partir de lo que cuenta el alumno. El cambio se revirtió; **los
+18 ADR siguen en "Propuesto"** en `docs/05_ADR.md`, sin tocar contenido de decisión,
+contexto ni las enmiendas de campo ya documentadas (grpcurl en ADR-01, tópico status por
+dominio en ADR-03/04, ADR-16/17/18).
+
+Ver "Pendiente — revisar con director/co-director" (arriba) para la nota de constancia
+informal y el camino para destrabarlo (confirmación escrita del director, o que él mismo
+edite el campo).
