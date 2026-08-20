@@ -1580,3 +1580,49 @@ frontend a medida), no la cambia. Con luz verde para probar sin esperar más RAM
 
 Con esto, el pedido del director (semanas 17-18 del roadmap original hablaban de streaming
 de video, pero el pedido real terminó siendo este front público con QR) queda cerrado.
+
+### 2026-08-20 (cierre) — Acceso remoto a la RPi5 fuera del LIT (túnel SSH inverso)
+
+Necesidad real: poder administrar la RPi5 desde fuera de la red del LIT (ej. desde casa),
+sin depender de estar presencialmente conectada a su WiFi.
+
+**Hallazgo previo a resolver esto** (relevante para seguridad, ya aclarado): la RPi5 tiene
+Tailscale activo, conectada a una red compartida grande con nodos de varias universidades
+(nombres tipo `ccc-leo-grafana`, `olemissstarlink-...`, `starlink-argentina` — este último
+parece ser el alias de esta misma RPi5 en esa red). Está registrada bajo la cuenta
+`clarkzjw@gmail.com`, no la de Pavet García — **confirmado por ella como esperado**,
+consistente con el testbed internacional colaborativo del proyecto (`CLAUDE.md` §1: Victoria,
+Manitoba, Waterloo, Memorial). No se tocó nada de esa red — al no ser una cuenta propia, no
+sirve para que ella se dé acceso a sí misma sin que alguien más la invite, así que se optó
+por una solución propia en vez de depender de eso.
+
+**Solución: túnel SSH inverso a través de la VM de cátedra** (infraestructura 100% propia,
+no depende de terceros):
+
+- **En la RPi5**: `systemd` (`vm-reverse-tunnel.service`, `enabled`) corre `autossh` en loop
+  (`Restart=always`), manteniendo abierto `-R 127.0.0.1:2222:localhost:22` hacia la VM. Usa
+  el mismo par de claves generado antes para el bridge MQTT (`~/.ssh/vm_bridge_ed25519`,
+  nunca se había usado para eso finalmente) para autenticarse como un usuario nuevo y
+  dedicado en la VM.
+- **En la VM**: usuario `rpi5-tunnel` nuevo, **sin shell** (`/usr/sbin/nologin`) y sin sudo —
+  su única función es sostener el túnel; si la clave privada de la RPi5 se filtrara, no
+  puede hacer nada más que eso. El puerto reenviado queda en `127.0.0.1:2222` de la VM (no
+  público — `GatewayPorts no`, el default), solo alcanzable saltando a través de la propia
+  VM.
+- **En la laptop** (y en cualquier máquina desde la que se quiera conectar): dos entradas
+  nuevas en `~/.ssh/config` — `vm-jump` (primer salto, a la VM como `federico.isaia.soria`,
+  la cuenta ya compartida con Fede) y `rpi5-remoto` (segundo salto, `ProxyJump vm-jump` hacia
+  `localhost:2222` como `leonode`). Conectarse queda en un solo comando:
+  ```
+  ssh rpi5-remoto
+  ```
+  Pide la passphrase de la clave de la VM la primera vez por sesión (`ssh-add` para no
+  repetirla). Ninguna clave privada ni passphrase real quedó en este documento ni en el
+  repo — las credenciales viven solo en `~/.ssh/` de cada máquina, como todo lo demás del
+  proyecto (`CLAUDE.md` §11).
+- **Verificado de punta a punta**: `ssh rpi5-remoto` desde la laptop devuelve `hostname` de
+  la RPi5 real (`raspberrypi`), saltando por la VM. Sin tocar el resto de la infraestructura
+  (el bridge MQTT y la pila pública siguen andando igual).
+
+No depende de la red del LIT, de Tailscale de terceros, ni de que nadie dé de alta ningún
+acceso — es autocontenido con lo que ya se controla (la RPi5 y la VM).
