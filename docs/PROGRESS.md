@@ -360,6 +360,40 @@ habiendo un único retained por tópico). Aplicado en `src/mock_starlink/__main_
 (`docs/05_ADR.md`) — ver detalle ahí. **Pendiente del lado de Fede**: actualizar su
 `will_set()` de `system/status/<node_id>` a `meteo/status/<node_id>`.
 
+### Semántica `source`/`producer` en `env_metrics` — decisión parcial (19/8/2026)
+
+El mismatch anotado el 11/8 (`source` fijo `"local_sensor"` + `producer` distinguiendo
+mock/real, sin calzar con el CHECK constraint de una sola columna) quedó sin cerrar
+después de la prueba del 14/8 — nunca se escribió por ningún lado, aunque había una
+conversación con Fede al respecto. Confirmado hoy el sentido de esa conversación:
+
+- **`source`** = identidad puntual del componente que generó el dato (distingue
+  mock de hardware real): `mock_bme280` / `esp32_bme280` / `mock_api` /
+  `api_open_meteo` / `api_owm` / `api_smn`.
+- **`producer`** = categoría del origen: `antenna` / `sensor` / `api`.
+
+Esto invierte lo que hoy hace el código de Fede (`source: "local_sensor"` —
+categoría, no identidad — y `producer: "mock_bme280"` — identidad, no categoría) y
+tampoco coincide con el CHECK constraint actual de `env_metrics.source`
+(`docs/06_DER.md`, una sola columna mezclando identidad y categoría) ni con
+`EnvPayloadIn`/`EnvSource` (`docs/07_API_REST.md` §9.2, que además tiene un tercer
+campo, `source_module`, a nivel de envelope — nunca llegó a tener columna propia en
+el DER).
+
+**Pendiente de resolver — no se tocó `docs/06_DER.md` ni `docs/07_API_REST.md`
+todavía, queda para cuando se decida con Fede:**
+
+1. **Dónde va `producer`**: ¿adentro de `metrics` (como ya lo tiene el código de
+   Fede — menos cambios de su lado) o afuera, a nivel de envelope del mensaje (como
+   `source_module` en el `EnvPayloadIn` ya escrito)?
+2. **Qué hacer con `source_module`** (`docs/07_API_REST.md` §9.2, `POST /ingest/env`):
+   ¿se renombra a `producer` y se alinea a esta decisión, o se trata como un diseño
+   viejo/borrador a reemplazar directamente?
+3. Lo que sí es seguro independientemente de 1 y 2: `env_metrics` necesita una
+   columna `producer` nueva — hoy solo tiene `source` — y el CHECK constraint de
+   `source` pasa a validar solo los 6 valores de identidad de arriba (no mezclar con
+   categoría).
+
 ### Revisión del repo de Fede — `tesis-sensor-node` (11/8/2026)
 
 Repo confirmado: `github.com/BlastNeos/tesis-sensor-node`, rama `development`, 3
