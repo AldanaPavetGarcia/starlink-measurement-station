@@ -1441,10 +1441,12 @@ Eso adelantó varios ítems que se esperaban "sin hacer". Estado real ítem por 
    contenedor no se cayó, exactamente el comportamiento que pide `CLAUDE.md`.
 3. ~~Traer las fixtures reales~~ — **hecho hoy**, `tests/fixtures/grpc/` (PR #21). Device id
    real redactado antes de commitear (repo público, ver README del directorio).
-4. Apuntar la RPi5 al broker de la VM de cátedra — **sigue bloqueado**: re-confirmado hoy
-   que `35.224.141.221:5883` no es alcanzable desde la RPi5 (`vm-broker-no-alcanzable`),
-   mismo problema de red que en la sesión anterior. Necesita que alguien de
-   infraestructura/redes del LIT abra la ruta, no es algo que se resuelva desde acá.
+4. ~~Apuntar la RPi5 al broker de la VM de cátedra~~ — **resuelto hoy** (segunda mitad de la
+   visita, ADR-20): no era un problema de firewall ni de la VM, era de *routing* — la red
+   del LIT/UNC solo deja salir por 80/443, pero la RPi5 tiene su propio enlace Starlink
+   (`eth0`) con salida libre. Ruta quirúrgica agregada + bridge de Mosquitto configurado y
+   verificado de punta a punta (mensajes reales de `starlink/metrics/#` y
+   `starlink/status/#` llegando a la VM). Detalle completo en la sección nueva más abajo.
 5. Confirmar con Fede la convivencia de ambos módulos en la RPi5 — **sigue sin resolver**:
    no hay ningún contenedor ni carpeta de su módulo en la RPi5 todavía.
 6. Arrancar `monitor_ca02.py` real por 72h — **lanzado hoy** (`nohup`, detached, sobrevive
@@ -1459,13 +1461,15 @@ Eso adelantó varios ítems que se esperaban "sin hacer". Estado real ítem por 
 8. Campaña inicial de medición (semana 22) — arrancó de hecho el 14/8 sin que nadie la
    planificara como tal: **8359 muestras reales acumuladas en ~6 días**
    (`data_completeness_pct` 82.9%, `availability_pct` 100%, latencia promedio 28.9ms,
-   p95 42.6ms). Primer hallazgo exploratorio, sin investigar a fondo todavía: **8358 de
-   8359 muestras tienen `is_obstructed=true`**, y el throughput bajado promedia apenas
-   ~43 Kbps (máximo 5.15 Mbps en 6 días) — muy por debajo de lo típico de Starlink. Puede
-   ser una obstrucción física real en la ubicación de la antena del LIT (consistente con
-   el objetivo del PI de correlacionar obstrucción/clima con degradación), o algo a
-   revisar en el mapeo de unidades del extractor — **sin diagnosticar todavía, anotado
-   para la próxima sesión de análisis, no es parte del alcance de esta verificación**.
+   p95 42.6ms). El hallazgo de `is_obstructed=true` casi constante (8358/8359 muestras)
+   **se diagnosticó y corrigió hoy** (ADR-19): era un bug de mapeo, no obstrucción física —
+   `obstructionStats.fractionObstructed` es una fracción acumulada desde que arrancó la
+   ventana de validación de la antena (horas/días), no el estado actual. Corregido usando
+   `dishGetDiagnostics.alerts.obstructed`, verificado contra la antena real en vivo
+   (`is_obstructed=False`, coherente con que no hay obstrucción visible). El throughput
+   bajado bajo (~43 Kbps promedio) queda **sin explicar todavía** — no se investigó a fondo
+   esta sesión, candidato a revisar en la próxima (¿unidades del extractor? ¿condición real
+   del enlace en este horario/ubicación?).
 9. Llevar al director/co-director los puntos de "Pendiente — revisar con director" — **sin
    cambios, sigue pendiente de esa reunión.**
 
@@ -1480,11 +1484,59 @@ así que no se perdió nada, y vale más tener el código al día.
 
 **Pendiente real después de esta visita** (ya no depende del LIT, son análisis/decisiones):
 
-- Diagnosticar el hallazgo del ítem 8 (obstrucción casi constante / throughput bajo) antes
-  de usarlo como dato de la memoria.
+- Diagnosticar el throughput bajo (~43 Kbps promedio) antes de usarlo como dato de la
+  memoria — `is_obstructed` ya se corrigió (ADR-19), esto es un hallazgo aparte, sin tocar.
 - Revisar `ca02_monitor_20ago_72h.jsonl` en la RPi5 cuando termine (~23/8) y volcar el
   resumen PASS/FAIL acá.
-- Ítems 4, 5 y 9 de arriba, que no se pueden cerrar sin Fede/director/redes del LIT.
-- Housekeeping menor sin hacer todavía: capturas de Grafana para la memoria (necesita
-  sesión de navegador) y limpieza de ramas ya mergeadas
+- Que Santiago confirme si se puede subir la RAM de la VM (mensaje redactado, sin mandar
+  todavía) — bloquea el deploy real de la pila pública (ver sección nueva abajo).
+- Capturas de Grafana para la memoria (semana 23) — pendiente de que alguien abra
+  `http://172.18.147.143:3000` con un navegador real (sin herramienta de navegador en esta
+  sesión).
+- Ítems 5 y 9 de arriba, que no se pueden cerrar sin Fede/director.
+- Housekeeping menor sin hacer todavía: limpieza de ramas ya mergeadas
   (`git branch -a --no-merged main`).
+
+### 2026-08-20 (continuación) — Bridge a la VM funcionando + deploy público preparado
+
+Pedido del director (Santiago), textual: *"Esto te sirve para hacer lo que quieras, podés
+montar el mqtt, el grafana, lo que quieras […] Lo ideal sería que ahí tengas el mqtt sí, y
+ponele que el front estaría ideal. Queda muy cheto poner el QR y que cualquiera pueda
+escanear y entrar a ver algunas métricas."*
+
+**Bridge MQTT (ADR-20, PR #23) — funcionando de punta a punta:**
+
+- Causa real de que la RPi5 no llegara a la VM (bloqueado desde la sesión anterior): **no
+  era la VM ni su firewall** — la red del LIT/UNC solo deja salir a internet por 80/443
+  (confirmado contra `portquiz.net`, un control neutral: falla igual que contra la VM). La
+  RPi5 tiene un segundo uplink, su propio terminal Starlink (`eth0`), sin esa restricción.
+- `sudo ip route add 35.224.141.221 via 100.64.0.1 dev eth0`, persistida en el perfil de
+  NetworkManager de `eth0` — quirúrgica, solo ese destino cambia de interfaz, el SSH de
+  gestión (por `wlan0`) no se tocó.
+- Usuario `rpi5-bridge` creado en el broker de la VM, probado con `mosquitto_pub` (CONNACK
+  0). Bridge de Mosquitto configurado en `services/broker/conf.d/bridge.conf` (gitignored,
+  `mosquitto.conf` no soporta variables de entorno — mismo patrón que el `passwordfile` de
+  `starlink-station-stack`).
+- **Verificado recibiendo datos reales en la VM**: `starlink/status/#` y
+  `starlink/metrics/#` completos, suscritos directo desde la VM con `mosquitto_sub`.
+- Sin regresión: `ca02_monitor_20ago_72h.jsonl` siguió en `ok: true` durante y después del
+  restart del broker local que aplicó el bridge.
+- Nota metodológica para la memoria: el tráfico del bridge sale por el mismo enlace
+  Starlink que se está midiendo (~500 bytes/60s, despreciable frente al ancho de banda
+  medido — no afecta la validez de las métricas, pero vale dejarlo anotado).
+
+**Deploy de la pila pública — preparado, no ejecutado:**
+
+`starlink-station-stack/infra/vm-stack/` (repo neutral de integración): `docker-compose.yml`
+apuntando a las 4 imágenes ya publicadas en GHCR (sin buildear en la VM), TimescaleDB
+tuneada para RAM baja (`shared_buffers=64MB`, `max_connections=20`), Grafana con **dos
+niveles de acceso** (`GF_AUTH_ANONYMOUS_ENABLED=true` + `GF_AUTH_ANONYMOUS_ORG_ROLE=Viewer`
+para la vista pública sin login y sin permiso de editar nada, login admin normal para
+administrar), dashboard nuevo curado para divulgación (`publico_starlink.json`) separado
+del técnico completo (`red_starlink.json`, sigue existiendo, requiere login).
+
+**No se ejecutó todavía**: la VM tiene 964MB de RAM total, ~500MB libres con el broker ya
+corriendo — sumar TimescaleDB+Grafana+consumer (~450-650MB) entra muy justo, riesgo real de
+OOM. Mensaje redactado para pedirle a Santiago más RAM antes de arriesgar el broker que ya
+funciona (ver scratchpad de la sesión) — sin mandar todavía, es la próxima acción concreta
+antes de poder generar el QR de verdad.
