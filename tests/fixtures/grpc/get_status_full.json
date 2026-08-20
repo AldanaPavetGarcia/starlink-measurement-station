@@ -1,0 +1,226 @@
+{
+  "id": "0",
+  "status": null,
+  "apiVersion": "42",
+  "dishGetStatus": {
+    "deviceInfo": {
+      "id": "ut01000000-00000000-00000000",
+      "hardwareVersion": "rev3_proto2",
+      "softwareVersion": "2026.07.19.mr82648",
+      "countryCode": "AR",
+      "utcOffsetS": -14400,
+      "softwarePartitionsEqual": false,
+      "isDev": false,
+      "bootcount": 217,
+      "antiRollbackVersion": 0,
+      "isHitl": false,
+      "manufacturedVersion": "",
+      "generationNumber": "1784780096",
+      "dishCohoused": false,
+      "boardRev": 0,
+      "buildId": "2b5ac4d4-3c58-4323-825f-f007b0fa6455.uterm_manifest.release",
+      "hardwareIndex": "UNKNOWN_HARDWARE_INDEX",
+      "boot": null
+    },
+    "deviceState": {
+      "uptimeS": "314333"
+    },
+    "secondsToFirstNonemptySlot": 1.7855663e+09,
+    "popPingDropRate": 0,
+    "obstructionStats": {
+      "fractionObstructed": 0.00038857586,
+      "validS": 314281,
+      "currentlyObstructed": false,
+      "avgProlongedObstructionDurationS": 0,
+      "avgProlongedObstructionIntervalS": "NaN",
+      "avgProlongedObstructionValid": false,
+      "timeObstructed": 0,
+      "patchesValid": 5147
+    },
+    "alerts": {
+      "motorsStuck": false,
+      "thermalShutdown": false,
+      "thermalThrottle": false,
+      "unexpectedLocation": false,
+      "mastNotNearVertical": false,
+      "slowEthernetSpeeds": false,
+      "roaming": false,
+      "installPending": false,
+      "isHeating": false,
+      "powerSupplyThermalThrottle": false,
+      "isPowerSaveIdle": false,
+      "dbfTelemStale": false,
+      "lowMotorCurrent": false,
+      "lowerSignalThanPredicted": false,
+      "slowEthernetSpeeds100": false,
+      "obstructionMapReset": false,
+      "dishWaterDetected": false,
+      "routerWaterDetected": false,
+      "upsuRouterPortSlow": false,
+      "noEthernetLink": false
+    },
+    "downlinkThroughputBps": 135778.02,
+    "uplinkThroughputBps": 145492.02,
+    "popPingLatencyMs": 22.709915,
+    "stowRequested": false,
+    "boresightAzimuthDeg": -179.74217,
+    "boresightElevationDeg": 64.99874,
+    "outage": null,
+    "gpsStats": {
+      "gpsValid": true,
+      "gpsSats": 9,
+      "noSatsAfterTtff": false,
+      "inhibitGps": false,
+      "pntFilterConvergenceState": "FILTER_CONVERGED"
+    },
+    "ethSpeedMbps": 1000,
+    "mobilityClass": "MOBILE",
+    "isSnrAboveNoiseFloor": true,
+    "readyStates": {
+      "cady": true,
+      "scp": true,
+      "l1l2": true,
+      "xphy": true,
+      "aap": true,
+      "rf": true
+    },
+    "classOfService": "CONSUMER",
+    "softwareUpdateState": "IDLE",
+    "isSnrPersistentlyLow": false,
+    "hasActuators": "HAS_ACTUATORS_UNKNOWN",
+    "disablementCode": "OKAY",
+    "hasSignedCals": true,
+    "softwareUpdateStats": {
+      "softwareUpdateState": "IDLE",
+      "softwareUpdateProgress": 1,
+      "updateRequiresReboot": false,
+      "rebootScheduledUtcTime": "0"
+    },
+    "alignmentStats": {
+      "hasActuators": "HAS_ACTUATORS_UNKNOWN",
+      "actuatorState": "ACTUATOR_STATE_IDLE",
+      "tiltAngleDeg": 24.993881,
+      "boresightAzimuthDeg": -179.74217,
+      "boresightElevationDeg": 64.99874,
+      "attitudeEstimationState": "FILTER_CONVERGED",
+      "attitudeUncertaintyDeg": 0.36016878,
+      "desiredBoresightAzimuthDeg": -179.99922,
+      "desiredBoresightElevationDeg": 62.631287
+    },
+    "initializationDurationSeconds": {
+      "attitudeInitialization": 32,
+      "burstDetected": 40,
+      "ekfConverged": 32,
+      "firstCplane": 44,
+      "firstPopPing": 52,
+      "gpsValid": 53,
+      "initialNetworkEntry": 40,
+      "networkSchedule": 46,
+      "rfReady": 30,
+      "stableConnection": 53
+    },
+    "isCellDisabled": false,
+    "swupdateRebootReady": false,
+    "secondsUntilSwupdateRebootPossible": -1,
+    "rebootReason": "REBOOT_REASON_NONE",
+    "highPowerTestMode": false,
+    "connectedRouters": [
+      "Router-010000000000000000A83A4A"
+    ],
+    "plcStats": {
+      "receivingPlc": false,
+      "averageTimeToEmpty": 0,
+      "averageTimeToFull": 0,
+      "batteryHealth": 0,
+      "hardwareRevisionId": 0,
+      "permanentFailure": false,
+      "port1Stats": {
+        "power": 0,
+        "status": "INACTIVE"
+      },
+      "port2Stats": {
+        "power": 0,
+        "status": "INACTIVE"
+      },
+      "port3Stats": {
+        "power": 0,
+        "status": "INACTIVE"
+      },
+      "plcRevision": "REV_D",
+      "safetyModeActive": false,
+      "stateOfCharge": 0,
+      "thermalThrottleLevel": 0
+    },
+    "isMovingFastPersisted": false,
+    "upsuStats": {
+      "appVersion": "0",
+      "bootVersion": "0",
+      "romVersion": "0",
+      "uptime": "0",
+      "dishPower": 0,
+      "routerPower": 0,
+      "forceDevSignedAllowed": false,
+      "debugPortLocked": false,
+      "stsafeCertsLocked": false,
+      "stsafeKeysLocked": false,
+      "g0Locked": 0,
+      "g0FirmwareVersion": 0,
+      "boardRev": 0,
+      "g0BoardId": 0
+    },
+    "dlBandwidthRestrictedReason": "LOW_SPEED_POLICY_LIMIT",
+    "ulBandwidthRestrictedReason": "POLICY_LIMIT",
+    "apsStats": {
+      "appVersion": "0",
+      "bootVersion": "0",
+      "romVersion": "0",
+      "uptime": "0",
+      "dishPower": 0,
+      "forceDevSignedAllowed": false,
+      "debugPortLocked": false,
+      "boardRev": 0
+    },
+    "ned2dishQuaternion": {
+      "qScalar": -0.15529163,
+      "qX": 0.6769401,
+      "qY": 0.7034923,
+      "qZ": -0.15078211
+    },
+    "downstreamRouters": {
+      "Router-010000000000000000A83A4A": {
+        "role": "BYPASSED",
+        "lastSeen": "1785880694751347541"
+      }
+    },
+    "accountShard": "ACCOUNT_SHARD_DEFAULT",
+    "macFlag": false,
+    "natFlag": "NAT_DISABLED",
+    "batteryStats": {
+      "stateOfCharge": 0,
+      "isCharging": false,
+      "powerSource": "POWER_SOURCE_UNKNOWN"
+    },
+    "userDebugModeEnabled": false,
+    "treatAsMetered": false,
+    "config": {
+      "snowMeltMode": "AUTO",
+      "locationRequestMode": "LOCAL",
+      "levelDishMode": "TILT_LIKE_NORMAL",
+      "powerSaveStartMinutes": 0,
+      "powerSaveDurationMinutes": 0,
+      "powerSaveMode": false,
+      "swupdateThreeDayDeferralEnabled": false,
+      "assetClass": 0,
+      "swupdateRebootHour": 3,
+      "applySnowMeltMode": true,
+      "applyLocationRequestMode": true,
+      "applyLevelDishMode": true,
+      "applyPowerSaveStartMinutes": true,
+      "applyPowerSaveDurationMinutes": true,
+      "applyPowerSaveMode": true,
+      "applySwupdateThreeDayDeferralEnabled": true,
+      "applyAssetClass": true,
+      "applySwupdateRebootHour": true
+    }
+  }
+}

@@ -1,0 +1,42 @@
+{
+  "id": "0",
+  "status": null,
+  "apiVersion": "42",
+  "dishGetDiagnostics": {
+    "id": "ut01000000-00000000-00000000",
+    "hardwareVersion": "rev3_proto2",
+    "softwareVersion": "2026.07.19.mr82648",
+    "utcOffsetS": -14400,
+    "alerts": {
+      "dishIsHeating": false,
+      "dishThermalThrottle": false,
+      "dishThermalShutdown": false,
+      "powerSupplyThermalThrottle": false,
+      "motorsStuck": false,
+      "mastNotNearVertical": false,
+      "slowEthernetSpeeds": false,
+      "softwareInstallPending": false,
+      "obstructed": false
+    },
+    "disablementCode": "OKAY",
+    "hardwareSelfTest": "PASSED",
+    "location": {
+      "enabled": false,
+      "latitude": 0,
+      "longitude": 0,
+      "altitudeMeters": 0,
+      "uncertaintyMetersValid": false,
+      "uncertaintyMeters": 0,
+      "gpsTimeS": 0
+    },
+    "alignmentStats": {
+      "boresightAzimuthDeg": 0,
+      "boresightElevationDeg": 0,
+      "desiredBoresightAzimuthDeg": 0,
+      "desiredBoresightElevationDeg": 0
+    },
+    "stowed": false,
+    "hardwareSelfTestCodes": [],
+    "overageRateLimited": false
+  }
+}

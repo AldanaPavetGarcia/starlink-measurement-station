@@ -1,0 +1,15 @@
+{
+  "apiVersion": "42",
+  "getDeviceInfo": {
+    "deviceInfo": {
+      "id": "ut01000000-00000000-00000000",
+      "hardwareVersion": "rev3_proto2",
+      "softwareVersion": "2026.07.19.mr82648",
+      "countryCode": "AR",
+      "utcOffsetS": -14400,
+      "bootcount": 217,
+      "generationNumber": "1784780096",
+      "buildId": "2b5ac4d4-3c58-4323-825f-f007b0fa6455.uterm_manifest.release"
+    }
+  }
+}
