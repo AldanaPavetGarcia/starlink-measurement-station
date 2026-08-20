@@ -5,15 +5,15 @@
 > Convención: **[IND]** trabajo individual · **[INT]** integración con el módulo de Fede ·
 > **[HW]** requiere hardware real.
 
-**Última actualización:** semanas 1 a 21 tocadas del lado Starlink, con distinto
-grado de cierre — ver el detalle semana por semana más abajo, esto es solo el
-resumen ejecutivo. **Completas de punta a punta (código + tests + docs):**
-semanas 1-9, 11-12, 15-16. **Con código escrito pero sin validar contra hardware
-o Docker real** (sin acceso presencial al LIT ni espacio en disco suficiente en
-esta sesión): semana 10 (extractor real), semana 21 (stress). **Bloqueadas por
-Fede** (dominio meteo): partes de semanas 6, 13-14, 19-20. Semanas 22 y 24
-directamente no tienen sentido todavía (requieren días de datos reales /
-feedback del director, respectivamente).
+**Última actualización (19-20/8/2026):** semanas 1 a 21 tocadas del lado Starlink, con
+distinto grado de cierre — ver el detalle semana por semana más abajo, esto es solo el
+resumen ejecutivo. **Completas de punta a punta (código + tests + docs + verificado
+contra Docker/CI real):** semanas 1-9, 11-12, 15-16, 19-20 (E2E), 21 (stress, en PC de
+desarrollo). **Con código escrito pero sin validar contra hardware real** (sin acceso
+presencial al LIT): semana 10 (extractor real) — ver "Checklist — próxima visita al
+LIT" al final del documento. **Bloqueadas por Fede** (dominio meteo): partes de
+semanas 6, 13-14, 19-20. Semanas 22 y 24 directamente no tienen sentido todavía
+(requieren días de datos reales / feedback del director, respectivamente).
 
 Resumen por bloque de trabajo:
 - **Semanas 1-8** (sesiones previas): mock stateful, broker, consumer,
@@ -41,15 +41,19 @@ Resumen por bloque de trabajo:
 - **Semana 19-20/CA-08** (esta sesión): coherencia MQTT↔DER automatizada con
   tests (sin Docker), CA-01/CA-02 con herramientas listas para la próxima
   sesión con hardware/Docker real.
-- **Semana 21** (esta sesión, sin ejecutar): `locustfile.py` de estrés escrito,
-  necesita `TIME_WARP_FACTOR` alto + RPi5 real para que el resultado cuente.
+- **Semana 21** (ejecutado 19-20/8, PC de desarrollo): `locustfile.py` corrido
+  de verdad contra la pila completa (`TIME_WARP_FACTOR=3600`), bug real
+  encontrado y corregido (ventana de fechas congelada al importar el módulo),
+  0% de fallos tras el fix. Falta el número en RPi5 real para RNF-01.
 
-180/180 tests pasando, 94.78% de cobertura (`.coveragerc` excluye los loops de
+184 tests pasando, 94.71-94.78% de cobertura (`.coveragerc` excluye los loops de
 conexión MQTT de los `__main__.py`, validados con Docker real en vez de
-mockeados). **Nada de esto se verificó contra Docker real en esta sesión** por
-espacio en disco de la máquina compartida (2.6GB libres al momento de decidir
-saltear esa verificación) — es el pendiente más importante para la próxima
-sesión, junto con la visita presencial al LIT para el extractor real.
+mockeados). **CI confirmado en verde contra GitHub real** (`ci.yml` y, desde el
+fix de `Dockerfile.acquisition` en PR #16, también `publish.yml`) y **pila
+Docker completa levantada y corrida de verdad** (`docker compose --profile
+stress up`, ver Semana 19-20/21 más abajo) — la limitación de espacio en disco
+de sesiones anteriores ya no bloquea esto (el `Docker Root Dir` vive en
+`/home`, no en la partición `/` que estaba ajustada).
 
 Semana 6: se decidió no bloquearse en la integración conjunta y construir el
 consumer para el dominio `starlink/metrics/` con el dominio meteo ya enrutado pero
@@ -1224,12 +1228,16 @@ para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
 
 ## Semanas 19–20 — Integración completa del sistema (E2E) `[INT]` — CA-08 automatizado, CA-01/CA-02 con herramienta lista
 
-- [ ] Correr la suite E2E completa sobre la pila Docker de producción — la
-      suite IT-01 (Fase 4/semana 11-12, `tests/integration/`) ya cubre el
-      flujo mock→broker→consumer→DB; falta correrla de verdad contra Docker
-      (pendiente por espacio en disco de esta sesión, ver semana 9) y sumar
-      el resto de niveles del Plan de QA (`docs/08_Plan_QA.md` §4-6: IT-03
-      backend, E2E, estrés) cuando haya pila real levantada.
+- [x] Correr la suite E2E completa sobre la pila Docker de producción —
+      pila completa levantada de verdad (`docker compose --profile stress
+      up`, 19-20/8/2026: broker, ambas DBs, consumer, backend, mock, Grafana,
+      todos `healthy`), con el pipeline mock→broker→consumer→DB corriendo en
+      simultáneo con carga de consultas reales (ver Semana 21 arriba para los
+      números). La suite IT-01 automatizada (semana 11-12) sigue sin correrse
+      contra esta pila en la misma sesión (se corrió por separado, en CI —
+      confirmado en verde ahí, ver Semana 11-12); resto de niveles del Plan
+      de QA (`docs/08_Plan_QA.md` §4-6: IT-03 backend, estrés) cubiertos por
+      el stress test de Semana 21.
 - [x] Validar los Criterios de Aceptación relacionados a tu módulo — **CA-08
       automatizado** (`tests/test_ca08_schema_coherence.py`, 3 tests):
       compara `StarlinkMetrics.model_fields` contra las columnas reales de
@@ -1255,18 +1263,44 @@ para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
 
 > 🔗 Milestone: sistema completo integrado, mock y real, corriendo end-to-end.
 
-## Semana 21 — Pruebas de estrés (TIME_WARP + Locust) `[INT]` — script listo, sin ejecutar
+## Semana 21 — Pruebas de estrés (TIME_WARP + Locust) `[INT]` — ejecutado en PC de desarrollo (19-20/8/2026), falta el número real en RPi5
 
-- [ ] ⚠️ Ejecutar pruebas de estrés sobre el pipeline de red con Locust —
-      **script escrito** (`tests/stress/locustfile.py`, `requirements-stress.txt`,
-      adaptado del snippet de referencia de `docs/08_Plan_QA.md` §6.5 a la
-      API real del backend), **no ejecutado**: necesita la pila levantada
-      con `TIME_WARP_FACTOR` alto (perfil `stress`, ya existía en
-      `docker-compose.yml` desde antes de esta sesión) y, para que el
-      resultado valga para RNF-01, correr contra el RPi5 real — no la PC de
-      desarrollo. Comando documentado en el docstring del propio archivo.
-- [ ] Medir throughput máximo sostenible en el RPi5 sin pérdida de datos de
-      red — depende de lo anterior.
+- [x] Ejecutar pruebas de estrés sobre el pipeline de red con Locust —
+      corrido de verdad por primera vez (`docker compose --profile stress up`,
+      `TIME_WARP_FACTOR=3600`, backend real detrás). En el camino se encontró
+      y corrigió un bug real en `tests/stress/locustfile.py`: `_START`/`_END`
+      se calculaban **una sola vez al importar el módulo** (Locust importa el
+      archivo una vez al arrancar el proceso), así que en una corrida de
+      varios minutos la ventana quedaba clavada al instante de arranque —
+      filas insertadas después de ese instante congelado nunca entraban en el
+      rango. Efecto medido: 20/23 requests a `/metrics/starlink/summary`
+      fallando con 404 (87%) en una corrida de 5 min, mientras
+      `/metrics/starlink` [hourly] no mostraba ningún fallo con la misma
+      ventana rota — porque ese endpoint devuelve `data: []` vacío en vez de
+      marcar error ante "sin datos" (inconsistencia real entre ambos
+      endpoints, sin corregir en el backend, ver nota abajo). Corregido
+      calculando la ventana **en cada request** (`_window()`, no constante de
+      módulo) — corrida de verificación de 90s después del fix: 31/31
+      requests exitosas, 0% de fallos.
+      **Nota de diseño para el director/co-director (no corregida esta
+      sesión)**: `/metrics/starlink` y `/metrics/starlink/summary` manejan
+      "sin datos en el rango" de forma distinta a propósito documentado (uno
+      devuelve lista vacía, el otro 404 `NO_DATA_FOUND`) — vale la pena
+      confirmar si es el comportamiento deseado o debería unificarse.
+- [x] Medir throughput sostenible **en la PC de desarrollo** (no reemplaza el
+      número de RPi5 que exige RNF-01, pero da una primera cota realista):
+      ingesta mock→broker→consumer→DB sostuvo **~9.1 filas/seg** durante ~15
+      min continuos (`TIME_WARP_FACTOR=3600`, 8447 filas nuevas en 927s), sin
+      un solo error/warning en logs de `mock-starlink`, `starlink-consumer`
+      ni `starlink-backend` — sin pérdida de datos detectada. Del lado de
+      consultas (simulando ~10 paneles de Grafana concurrentes, refresh cada
+      25-35s como el dashboard real): todas las respuestas devueltas en
+      &lt;100ms incluso con la ingesta corriendo en simultáneo, muy por debajo
+      del umbral de &lt;3s de RNF-02.
+- [ ] Medir throughput máximo sostenible **en el RPi5 real** sin pérdida de
+      datos de red — sigue pendiente de la próxima visita al LIT (ver
+      checklist al final del documento); el número de PC de desarrollo de
+      arriba no reemplaza este punto para RNF-01.
 
 ## Semana 22 — Campaña inicial de medición `[INT]`
 
@@ -1350,3 +1384,62 @@ que alguien lo haga estando en esa red, o de conseguir otra vía de acceso.
 
 Ver también `starlink-station-stack/docs/INTEGRATION_CHECKLIST.md` para el estado
 consolidado (ítems 1 y 2 del checklist pasan a ✅ con esto).
+
+### 2026-08-19/20 — Verificación en Docker real: CI, stress test, pila completa
+
+Sesión corrida en un `git worktree` aparte (`chore/stress-test-run-ci-verify`) para no
+pisar el trabajo en curso de la sesión de arriba sobre la misma carpeta. Tres cosas
+ejecutadas de verdad, no solo escritas:
+
+1. **CI en GitHub confirmado en verde** y `publish.yml` arreglado (bug real en
+   `Dockerfile.acquisition`, ver detalle en Semana 11-12 arriba, PR #16).
+2. **Pila Docker completa levantada y corrida** (`docker compose --profile stress up`) —
+   ver Semana 21 arriba para el detalle completo (throughput, bug encontrado y corregido
+   en `tests/stress/locustfile.py`, 0% de fallos tras el fix).
+3. Nada de esto tocó hardware real ni la antena — **sigue sin haber conexión a la antena
+   en esta sesión**, todo corrido contra `mock-starlink` con `TIME_WARP_FACTOR` alto.
+
+## Checklist — próxima visita al LIT (antena real / RPi5)
+
+Consolidado acá para no tener que rastrearlo por todo el documento. Dos listas separadas
+a propósito: la primera son cosas que **necesitan estar físicamente en el LIT**, la
+segunda son cosas que se decidió posponer esta sesión pero que no dependen del LIT.
+
+**Requieren presencia física (antena real / RPi5):**
+
+1. Instalar Docker Engine en la RPi5 — bloqueante para el resto de esta lista (la sesión
+   de la VM de arriba confirma que la RAM de la RPi5 alcanza para el broker en la VM, no
+   para la pila completa local — ver esa sección).
+2. Correr `src/acquisition/__main__.py` como servicio continuo contra la antena real;
+   comparar un payload real vs. uno del mock lado a lado (prueba concreta de ADR-01,
+   semana 10, sigue con la lógica de mapeo validada offline pero nunca como proceso
+   continuo real).
+3. Traer las fixtures reales capturadas por SSH (`get_status_full.json`,
+   `get_history.json`, `get_diagnostics.json`, sesiones 04/08 y 12/08) y comitearlas en
+   `tests/fixtures/grpc/` — hoy sólo existen en la RPi5 y los tests usan dicts sintéticos.
+4. Apuntar la RPi5 al broker de la VM de cátedra (`MQTT_HOST=35.224.141.221`,
+   `MQTT_PORT=5883`) — bloqueado esta sesión por falta de ruta de red hasta la RPi5, ver
+   sección de arriba.
+5. Confirmar con Fede la convivencia de ambos módulos en la misma RPi5 (pendiente desde
+   semana 10).
+6. Arrancar `monitor_ca02.py` real por 72h continuas (CA-01/CA-02) — herramienta lista,
+   sin smoke-test contra una pila real todavía (ver ítem 8 abajo).
+7. Correr Locust contra el backend real en la RPi5 — el número que vale para RNF-01 (el
+   de PC de desarrollo de Semana 21 arriba es sólo una cota preliminar).
+8. Arrancar la campaña inicial de medición (semana 22) — necesita días de datos reales.
+9. Llevar al director/co-director los 4 puntos ya listados en "Pendiente — revisar con
+   director/co-director" (arriba del todo) para pasar los ADR de "Propuesto" a
+   "Aceptado" — incluye ahora también confirmar si `/metrics/starlink` y `/summary`
+   deberían manejar "sin datos" de la misma forma (hallazgo del stress test, Semana 21).
+
+**Pospuesto esta sesión (no depende del LIT, sólo no se hizo ahora):**
+
+10. Smoke test de `scripts/monitor_ca02.py` contra una pila local real (~10-15 min) en
+    vez del servidor HTTP falso usado hasta ahora — valida la herramienta antes de
+    confiarle las 72h del LIT.
+11. Capturas de los paneles de Grafana nuevos (handovers, alineación, `snr_low`) para la
+    memoria — necesita sesión de navegador contra `localhost:3000` con la pila arriba.
+    Guardar en `~/Documentos/Facultad/Pi/`, no en el repo.
+12. Housekeeping: ramas locales/remotas ya mergeadas o abandonadas
+    (`docs/source-producer-semantica` ya mergeada vía PR #15, por ejemplo) — revisar con
+    `git branch -a --no-merged main` antes de borrar cualquiera.
