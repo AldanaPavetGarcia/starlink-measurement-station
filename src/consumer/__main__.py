@@ -16,7 +16,7 @@ import os
 import paho.mqtt.client as mqtt
 from paho.mqtt.properties import PacketTypes, Properties
 
-from common import connect_with_retry, setup_logging
+from common import connect_with_retry, set_credentials_if_present, setup_logging
 
 from .db import MeteoDB, NetHealthDB
 from .router import ConsumerRouter
@@ -78,6 +78,9 @@ def main() -> None:
     client.on_connect = on_connect
     client.on_disconnect = on_disconnect
     client.on_message = on_message
+
+    if set_credentials_if_present(client):
+        logger.info("credenciales MQTT configuradas (broker con auth, ej. ADR-20)")
 
     connect_properties = Properties(PacketTypes.CONNECT)
     connect_properties.SessionExpiryInterval = _SESSION_NEVER_EXPIRES

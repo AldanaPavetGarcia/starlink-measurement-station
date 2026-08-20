@@ -9,6 +9,6 @@ ni de consumer en ningún sentido, para no crear un acoplamiento circular.
 """
 
 from .logging import JsonLogFormatter, setup_logging
-from .mqtt import connect_with_retry
+from .mqtt import connect_with_retry, set_credentials_if_present
 
-__all__ = ["JsonLogFormatter", "setup_logging", "connect_with_retry"]
+__all__ = ["JsonLogFormatter", "setup_logging", "connect_with_retry", "set_credentials_if_present"]
