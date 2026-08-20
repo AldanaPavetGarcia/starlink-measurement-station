@@ -31,11 +31,33 @@ Ejecución (una vez levantada la pila con TIME_WARP_FACTOR alto):
 """
 
 import os
+from datetime import datetime, timedelta, timezone
 
 from locust import HttpUser, between, task
 
 BACKEND_API_KEY = os.environ.get("BACKEND_API_KEY", "test-key")
 NODE_ID = os.environ.get("STARLINK_NODE_ID", "lit-cordoba-01")
+
+# Rango relativo a "ahora" (no hardcodeado): un dashboard de Grafana real usa
+# ventanas relativas, no fechas fijas -- un rango fijo queda viejo apenas pasa
+# el momento en que se escribió y el backend responde legítimamente "sin
+# datos" (404 NO_DATA_FOUND en /summary) apenas la ejecución real deja de
+# caer justo en esa ventana. Encontrado corriendo el stress test 19-20/8/2026
+# (15/15 fallos en /summary con el rango viejo hardcodeado).
+#
+# Ojo con calcular esto una sola vez a nivel de módulo: Locust importa el
+# archivo una vez al arrancar, así que un `_START`/`_END` calculado acá
+# quedaría clavado al instante de arranque del proceso -- en una corrida de
+# varios minutos, para cuando el test lleva un rato corriendo, `_END` ya
+# quedó "en el pasado" respecto al momento real de cada request, y las filas
+# nuevas insertadas después de ese instante congelado quedan fuera de la
+# ventana (89% de fallos en /summary al re-correr con esto congelado, 0% en
+# /metrics/starlink porque ese endpoint tolera `data: []` vacío en vez de
+# marcarlo error -- ver `_window()` abajo, se recalcula en cada request).
+def _window() -> tuple[str, str]:
+    now = datetime.now(timezone.utc)
+    start = (now - timedelta(days=7)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return start, now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 class GrafanaUser(HttpUser):
@@ -49,19 +71,21 @@ class GrafanaUser(HttpUser):
     def query_starlink_7d(self):
         """Consulta más frecuente: 7 días de latencia (usa CAGG net_hourly,
         RNF-02 -- debe responder en <3s incluso bajo carga)."""
+        start, end = _window()
         self.client.get(
             f"/api/v1/metrics/starlink"
             f"?node_id={NODE_ID}"
-            f"&start=2026-05-25T00:00:00Z&end=2026-06-01T00:00:00Z"
+            f"&start={start}&end={end}"
             f"&resolution=hourly",
             headers=self.headers, name="/metrics/starlink [7d hourly]",
         )
 
     @task(2)
     def query_summary(self):
+        start, end = _window()
         self.client.get(
             f"/api/v1/metrics/starlink/summary"
-            f"?node_id={NODE_ID}&start=2026-05-25T00:00:00Z&end=2026-06-01T00:00:00Z",
+            f"?node_id={NODE_ID}&start={start}&end={end}",
             headers=self.headers, name="/metrics/starlink/summary [7d]",
         )
 
