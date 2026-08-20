@@ -1488,11 +1488,11 @@ así que no se perdió nada, y vale más tener el código al día.
   memoria — `is_obstructed` ya se corrigió (ADR-19), esto es un hallazgo aparte, sin tocar.
 - Revisar `ca02_monitor_20ago_72h.jsonl` en la RPi5 cuando termine (~23/8) y volcar el
   resumen PASS/FAIL acá.
-- Que Santiago confirme si se puede subir la RAM de la VM (mensaje redactado, sin mandar
-  todavía) — bloquea el deploy real de la pila pública (ver sección nueva abajo).
-- Capturas de Grafana para la memoria (semana 23) — pendiente de que alguien abra
-  `http://172.18.147.143:3000` con un navegador real (sin herramienta de navegador en esta
-  sesión).
+- ~~Que Santiago confirme si se puede subir la RAM de la VM~~ — **resuelto**: dio luz verde
+  a probar con la RAM actual, la pila pública ya está desplegada y verificada (ver sección
+  "Cierre" más abajo).
+- ~~Capturas de Grafana para la memoria~~ — **hechas**, `Grafana_Red_Starlink_20ago2026.png`
+  en `~/Documentos/Facultad/Pi/`.
 - Ítems 5 y 9 de arriba, que no se pueden cerrar sin Fede/director.
 - Housekeeping menor sin hacer todavía: limpieza de ramas ya mergeadas
   (`git branch -a --no-merged main`).
@@ -1535,8 +1535,48 @@ para la vista pública sin login y sin permiso de editar nada, login admin norma
 administrar), dashboard nuevo curado para divulgación (`publico_starlink.json`) separado
 del técnico completo (`red_starlink.json`, sigue existiendo, requiere login).
 
-**No se ejecutó todavía**: la VM tiene 964MB de RAM total, ~500MB libres con el broker ya
-corriendo — sumar TimescaleDB+Grafana+consumer (~450-650MB) entra muy justo, riesgo real de
-OOM. Mensaje redactado para pedirle a Santiago más RAM antes de arriesgar el broker que ya
-funciona (ver scratchpad de la sesión) — sin mandar todavía, es la próxima acción concreta
-antes de poder generar el QR de verdad.
+**No se ejecutó en el momento de escribir esto**: la VM tiene 964MB de RAM total, ~500MB
+libres con el broker ya corriendo — sumar TimescaleDB+Grafana+consumer (~450-650MB) entra
+muy justo, riesgo real de OOM. Mensaje redactado para pedirle a Santiago más RAM antes de
+arriesgar el broker que ya funciona (ver scratchpad de la sesión) — sin mandar, quedó
+resuelto por la respuesta que él mismo mandó, ver sección siguiente.
+
+### 2026-08-20 (cierre) — Pila pública desplegada y verificada de punta a punta
+
+Respuesta de Santiago al mensaje planteado (no hizo falta mandárselo, ya lo cubrió él solo):
+*"Ojo que todo lo gráfico se hace en client-side. He montado grafana en esas mini compus sin
+problema […] Probalo y si hace falta lo escalamos."* También tiró la idea de un frontend a
+medida (Node + Highcharts) pero la bajó en el mismo mensaje: *"No es pivotal para el PI de
+todas formas. Con grafana estamos de lujo."* — confirma la decisión de ADR-13 (Grafana sobre
+frontend a medida), no la cambia. Con luz verde para probar sin esperar más RAM:
+
+- **Swap de 1GB agregado a la VM** (no tenía nada) como red de seguridad, persistido en
+  `/etc/fstab`.
+- **`infra/vm-stack/` desplegado**: TimescaleDB + consumer + Grafana, las tres imágenes
+  desde GHCR, sin buildear nada en la VM. Tardó varios minutos (conexión de la VM, no la
+  RAM) pero terminó sin problemas — llegó a usar ~118MB de swap durante el arranque, dentro
+  de lo esperado, sin que el kernel matara ningún proceso.
+- **Bug real encontrado al verificar**: el consumer no podía conectar al broker de la VM
+  (`Not authorized`) — ningún cliente MQTT del proyecto soportaba autenticación, porque el
+  broker local siempre fue `allow_anonymous true` (ADR-04/ADR-14) y nadie lo había
+  necesitado hasta el bridge de ADR-20. Corregido: `set_credentials_if_present()` nueva en
+  `src/common/mqtt.py` (PR #25), usuario `vm-consumer` dedicado en el broker de la VM (no
+  reusa las credenciales del bridge de la RPi5).
+- **Verificado de punta a punta con datos reales**: RPi5 (`acquisition`) → broker local →
+  bridge → broker VM → `vm-starlink-consumer` → TimescaleDB de la VM, filas nuevas
+  persistiendo en tiempo real. Grafana en `http://35.224.141.221:8080` sirviendo esos datos
+  vía `/api/ds/query` sin login.
+- **Acceso anónimo confirmado con el alcance correcto**: `GET /api/search` sin credenciales
+  devuelve los dashboards (ve datos); `POST /api/dashboards/db` sin credenciales devuelve
+  `403` (no puede crear/editar nada). Un matiz encontrado: con `GF_AUTH_ANONYMOUS_ORG_ROLE=
+  Viewer` el anónimo ve **los dos** dashboards (el público curado y el técnico completo
+  `red-starlink`), no solo el primero — Grafana da ese rol a nivel de organización entera,
+  no por dashboard. No es un problema de seguridad (nada ahí es sensible), pero si se quiere
+  que el QR muestre *solo* la vista curada haría falta separar por carpeta/permisos, no
+  hecho todavía.
+- **QR generado**: apunta a
+  `http://35.224.141.221:8080/d/starlink-publico/estacion-starlink-lit-e28094-vista-publica`,
+  guardado en `~/Documentos/Facultad/Pi/QR_Estacion_Starlink_LIT.png`.
+
+Con esto, el pedido del director (semanas 17-18 del roadmap original hablaban de streaming
+de video, pero el pedido real terminó siendo este front público con QR) queda cerrado.
