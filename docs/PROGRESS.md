@@ -496,11 +496,22 @@ que había quedado abierta en la sesión del 6/8 (ver memoria
   `starlink-acquisition`). `docker-compose.yml` sigue usando `build:` local
   igual que antes (no referencia las imágenes de GHCR) — no se cambió porque
   eso sí depende de coordinar con Fede si el compose de integración va a vivir
-  acá o en un repo neutral (ver punto siguiente). El workflow en sí no corrió
-  todavía contra GitHub real (no hubo push a un remoto en esta sesión).
+  acá o en un repo neutral (ver punto siguiente).
+  **Actualizado 19-20/8: nota vieja, corregida** — `publish.yml` sí corrió contra
+  GitHub real, repetidas veces (confirmado con `gh run list`). De hecho **falló
+  consistentemente hasta hoy**: la pierna `amd64` pedía a `grpcurl` un asset
+  llamado `..._linux_amd64.tar.gz` que no existe (el release real lo llama
+  `x86_64`) — el mismo bug que ya estaba anotado como pendiente en el plan de
+  cierre del 14/8, corregido recién en esta sesión
+  (`Dockerfile.acquisition`, PR #16). Primera corrida en verde:
+  `gh run list --workflow=publish.yml` — 20/8/2026, 01:19 UTC.
 - **Decidir si el `docker-compose.yml` de integración (broker + ambos mocks) se queda
-  en este repo o se muda a un repo neutral** una vez que Fede tenga el suyo — por ahora
-  vive acá porque fue lo que hubo que levantar primero. Ahora son 4 servicios propios
+  en este repo o se muda a un repo neutral** — **Resuelto 19/8/2026**:
+  `starlink-station-stack` (`github.com/AldanaPavetGarcia/starlink-station-stack`) es
+  ese repo neutral, ya creado y con la integración del broker compartido (ver
+  `docs/INTEGRATION_CHECKLIST.md` ahí). No copia el `docker-compose.yml` completo —
+  solo la parte de infraestructura compartida (el broker); el compose completo de
+  este repo sigue viviendo acá. Ahora son 4 servicios propios
   (`mock_starlink`/`acquisition`, `consumer`, `backend`) más `starlink_db`/
   `station_config_db`/`grafana` — cuanto más tiempo pase, más costoso migrar el compose
   a un repo neutral sin romper nada; vale la pena decidirlo pronto si la idea sigue en pie.
@@ -1118,7 +1129,7 @@ para quien tenga la pila abierta en Grafana, http://localhost:3000).
 para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
 `docs/07_API_REST.md`) — pendiente de rama + PR según el ruleset de `main`.
 
-## Semanas 11–12 — Suite de testing + CI `[IND]` ✅ COMPLETA (código; CI sin correr en GitHub real todavía)
+## Semanas 11–12 — Suite de testing + CI `[IND]` ✅ COMPLETA (código y CI corriendo en GitHub real, confirmado 19-20/8)
 
 - [x] Escribir/completar suites de integración (IT-01): mock → broker →
       consumer → DB — `tests/integration/test_it01_pipeline.py`, automatiza
@@ -1155,10 +1166,15 @@ para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
       `starlink-backend`, `starlink-acquisition` -- con tag por SHA y
       `latest` solo en `main`; cierra el pendiente "publicar mock-starlink a
       GHCR" del modelo polyrepo, ver "Coordinación pendiente con Fede").
-      **Sin verificar corriendo en GitHub Actions real todavía** — no hay
-      push a un remoto en esta sesión; revisar el primer run real (y que
-      `GITHUB_TOKEN` tenga permiso `packages: write` en la config del repo)
-      antes de dar el job `publish` por cerrado.
+      **Actualizado 19-20/8, nota vieja corregida**: los dos workflows corren
+      contra GitHub real desde hace rato — `ci.yml` en verde en cada PR de esta
+      sesión (#13 a #19), `publish.yml` también corre (confirmado con
+      `gh run list --workflow=publish.yml`) pero **falló consistentemente hasta
+      hoy**: la pierna `amd64` armaba mal la URL de `grpcurl` (pedía
+      `..._linux_amd64.tar.gz`, el release real se llama `x86_64`) — corregido en
+      `Dockerfile.acquisition` (PR #16). Primera corrida en verde de `publish.yml`:
+      20/8/2026 01:19 UTC. `packages: write` del `GITHUB_TOKEN` no fue el
+      problema — el build fallaba antes de llegar al push a GHCR.
 
 ## Semanas 13–14 — Soporte a integración de APIs externas `[INT — Fede lidera]`
 
