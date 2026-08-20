@@ -11,7 +11,7 @@ import logging
 import pytest
 
 from common.logging import JsonLogFormatter, setup_logging
-from common.mqtt import connect_with_retry
+from common.mqtt import connect_with_retry, set_credentials_if_present
 
 
 def test_json_log_formatter_emite_json_valido_con_campos_base():
@@ -55,6 +55,11 @@ class _FakeMqttClient:
         self.attempts = 0
         self.connected_kwargs = None
 
+        self.credentials = None
+
+    def username_pw_set(self, username, password):
+        self.credentials = (username, password)
+
     def connect(self, host, port, keepalive=60, **kwargs):
         self.attempts += 1
         if self.attempts <= self.fail_times:
@@ -86,3 +91,31 @@ def test_connect_with_retry_pasa_connect_kwargs():
         assert client.connected_kwargs == {"clean_start": False, "properties": "fake-props"}
     finally:
         monkeypatch_sleep.undo()
+
+
+def test_set_credentials_if_present_con_ambas_variables(monkeypatch):
+    """El broker local (ADR-04/ADR-14) es anónimo -- esto solo importa para
+    el bridge a la VM de cátedra (ADR-20), donde sí hace falta auth."""
+    monkeypatch.setenv("MQTT_USERNAME", "rpi5-bridge")
+    monkeypatch.setenv("MQTT_PASSWORD", "secreto")
+    client = _FakeMqttClient(fail_times=0)
+    assert set_credentials_if_present(client) is True
+    assert client.credentials == ("rpi5-bridge", "secreto")
+
+
+def test_set_credentials_if_present_sin_variables_no_llama_nada(monkeypatch):
+    monkeypatch.delenv("MQTT_USERNAME", raising=False)
+    monkeypatch.delenv("MQTT_PASSWORD", raising=False)
+    client = _FakeMqttClient(fail_times=0)
+    assert set_credentials_if_present(client) is False
+    assert client.credentials is None
+
+
+def test_set_credentials_if_present_solo_una_variable_no_alcanza(monkeypatch):
+    """No tiene sentido intentar autenticar con solo la mitad de las
+    credenciales -- se deja conectar anónimo, como si no hubiera nada."""
+    monkeypatch.setenv("MQTT_USERNAME", "rpi5-bridge")
+    monkeypatch.delenv("MQTT_PASSWORD", raising=False)
+    client = _FakeMqttClient(fail_times=0)
+    assert set_credentials_if_present(client) is False
+    assert client.credentials is None
