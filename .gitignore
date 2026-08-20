@@ -34,3 +34,7 @@ Thumbs.db
 
 # Docker (cuando aparezca en semana 3+)
 *.log
+
+# Bridge MQTT hacia la VM de cátedra (20/8/2026) -- credenciales reales,
+# nunca versionar. Ver services/broker/conf.d/bridge.conf.example.
+services/broker/conf.d/bridge.conf

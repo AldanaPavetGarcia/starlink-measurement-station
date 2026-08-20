@@ -1,0 +1,20 @@
+# Copiar a bridge.conf (mismo directorio, gitignored) y completar las
+# credenciales reales -- NUNCA versionar el archivo con el password real.
+# Generar el usuario en la VM primero (starlink-station-stack/docs/
+# CONNECTING.md), después completar acá con esas mismas credenciales.
+#
+# Replica starlink/# (todo lo que publica este nodo: mock_starlink o
+# acquisition, más status/LWT) hacia el broker compartido de la VM de
+# cátedra, para que Fede/el consumer centralizado puedan verla sin que la
+# RPi5 necesite estar en la misma red que nadie más. No se suscribe a nada
+# de vuelta (`out`, no `both`) -- este broker local sigue siendo la fuente
+# de verdad para el consumer/backend que corren en la misma RPi5.
+
+connection vm-bridge
+address 35.224.141.221:5883
+topic starlink/# out 1
+bridge_protocol_version mqttv50
+cleansession false
+notifications false
+remote_username CAMBIAR_USUARIO
+remote_password CAMBIAR_PASSWORD

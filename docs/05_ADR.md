@@ -55,6 +55,8 @@ Este documento es de carácter vivo: cada ADR puede ser superado por uno posteri
 | **ADR-16** | Exposición de Eventos de Handover Satelital | Esquema / HW real | Campos agregados `handover_count`/`outage_duration_ms` en `metrics` | **Propuesto** |
 | **ADR-17** | Reemplazo de `snr_db` por `snr_low` | Esquema / HW real | Booleano `snr_low` (← `not isSnrAboveNoiseFloor`; `isSnrPersistentlyLow` no existe en el firmware real, hallazgo 12/08) sobre float inexistente en firmware real | **Propuesto** |
 | **ADR-18** | Exposición de `alignmentStats` (Orientación Física de la Antena) | Esquema / HW real | Campos planos de tilt/azimuth/elevación en `metrics`, sin sub-objeto anidado | **Propuesto** |
+| **ADR-19** | Corrección de la fuente de `is_obstructed` | Esquema / HW real | `dishGetDiagnostics.alerts.obstructed` (llamada gRPC nueva) sobre `obstructionStats.fractionObstructed > 0`, que era acumulado y no el estado actual (hallazgo 20/08) | **Propuesto** |
+| **ADR-20** | Bridge MQTT saliente hacia el broker compartido de la VM de cátedra | Persistencia / IF | Bridge `out` de Mosquitto sobre `starlink/#`, credenciales en `conf.d/` gitignored, salida por el enlace Starlink (`eth0`) | **Propuesto** |
 
 # FASE 1 — Diseño y Definición de Contratos
 
@@ -1216,21 +1218,163 @@ impacto en `SCHEMA_VERSION` (el tipo del campo no cambia, solo su rango válido)
 | **Seis columnas nuevas en `network_metrics`** | ⚠️ CONTRA | Mismo criterio de ADR-16: agregar columnas a una hypertable es seguro (no requiere migración destructiva), pero es el ADR con más columnas nuevas de una sola vez del proyecto. |
 | **Sin impacto en `SCHEMA_VERSION`** | ✅ PRO | A diferencia de ADR-17, son campos nuevos (compatibles hacia atrás) — no fuerza el bump por sí solo, aunque se aplica igual porque ADR-17 se implementa en el mismo pasaje. |
 
+## ADR-19 — Corrección de la Fuente de `is_obstructed`: Estado Actual vs. Fracción Acumulada
+
+| **Atributo** | **Valor** |
+| --- | --- |
+| **ID** | ADR-19 |
+| **Estado** | Propuesto |
+| **Fecha** | Agosto 2026 |
+| **Depende de** | ADR-01 |
+| **Impacta en** | ADR-06, ADR-11, ADR-13 |
+
+### Contexto y Motivación
+
+La visita presencial al LIT del 20/08/2026, con seis días de datos reales acumulados desde la
+semana 10 (ver `docs/PROGRESS.md`), mostró un hallazgo llamativo: 8358 de 8359 muestras reales
+tenían `is_obstructed=true`, con la antena en una ubicación sin obstrucción visible aparente.
+Investigado en el momento, no era un dato real — era un bug de mapeo.
+
+La implementación original (semana 10, sesión del 12/08) derivaba `is_obstructed` de
+`dishGetStatus.obstructionStats.fractionObstructed > 0`, documentado en su momento como
+"la única señal disponible, ya que el firmware no expone un booleano `currently_obstructed`"
+(confirmado ausente ese día). Esa parte seguía siendo cierta el 20/08 (reconfirmado en vivo
+contra la antena, firmware ya en `2026.08.10.mr84226`) — pero el campo elegido como proxy no
+era el correcto: `fractionObstructed` es la fracción de muestras obstruidas **acumulada desde
+que arrancó la ventana de validación de la antena** (`obstructionStats.validS`, del orden de
+horas o días de uptime continuo), no el estado instantáneo. Con el umbral `>0` usado, cualquier
+obstrucción que hubiera ocurrido en algún momento de esa ventana — un pájaro cruzando, un
+segundo de nubes bajas — dejaba el booleano en `True` durante todo el resto de la ventana,
+aunque el cielo estuviera despejado en el momento de cada medición puntual. El valor medido en
+vivo (`fractionObstructed=0.00038`, 0.04%) confirma esto: es un número minúsculo, consistente
+con cielo mayormente despejado, pero el umbral `>0` lo convertía en `True` de todas formas.
+
+### Alternativas Consideradas
+
+| **Aspecto** | **Alt. A — Subir el umbral de `fractionObstructed`** | **Alt. B — `dishGetDiagnostics.alerts.obstructed` ✅** | **Alt. C — Dejar `is_obstructed` en `null` siempre** |
+| --- | --- | --- | --- |
+| Semántica correcta ("obstruido ahora") | ⚠️ Sigue siendo una fracción acumulada — cualquier umbral es arbitrario y no representa el instante de la medición | ✅ Flag de estado actual, exactamente lo que pide el DER (§3.1) y el objetivo de correlación del PI | — |
+| Validado contra la antena real | ⚠️ No hay forma de calibrar un umbral "correcto" sin inventar un valor sin base empírica | ✅ Confirmado en vivo el 20/08/2026: `is_obstructed=False` con la antena despejada | — |
+| Costo de implementación | ✅ Cambio de una constante | ⚠️ Requiere una cuarta llamada gRPC por ciclo de polling (`get_diagnostics`), con su propio manejo de fallo | ✅ Ninguno |
+| Valor para el objetivo del PI | ⚠️ Sigue siendo una aproximación cuestionable para correlacionar con clima | ✅ Dato confiable para CA-04/campaña de medición (Semana 22) | ❌ Pierde el campo por completo, contradice RF-03 |
+
+### Decisión
+
+**✅ Decisión: Alternativa B — `dishGetDiagnostics.alerts.obstructed`**
+
+Se agrega `get_diagnostics()` a `src/acquisition/grpc_client.py` (tercera llamada de lectura,
+junto a `get_status`/`get_history` — dentro del alcance ya declarado en `CLAUDE.md` §1.1).
+`map_status()`/`build_metrics()` (`src/acquisition/starlink_extractor.py`) toman `diagnostics`
+como parámetro opcional: si la llamada falla ese ciclo (antena momentáneamente no disponible),
+`is_obstructed` queda en `None` para ese payload en vez de tumbar el ciclo completo o inventar
+un valor — mismo criterio de degradación ya establecido para el resto de `metrics`.
+
+`dishGetDiagnostics.alerts` usa serialización JSON dispersa (proto3): solo aparecen las claves
+en `TRUE` (confirmado contra la antena real, `alerts: {}` cuando no hay ningún alerta activo).
+La ausencia de la clave `"obstructed"` en el dict significa `False`, no "sin dato" — eso solo
+ocurre si el objeto `dishGetDiagnostics` entero está ausente (llamada fallida).
+
+**Sin verificar todavía contra un evento de obstrucción real** — la antena no tuvo ninguno
+durante la visita del 20/08. Queda pendiente confirmar la próxima vez que haya condiciones
+reales de obstrucción (nubes bajas, algo bloqueando la vista momentáneamente).
+
+### Pros y Contras
+
+| **Aspecto** | **PRO ✅ / CONTRA ⚠️** | **Detalle** |
+| --- | --- | --- |
+| **Corrige un dato incorrecto en la campaña de medición en curso** | ✅ PRO | Semana 22 (`docs/PROGRESS.md`) venía acumulando `is_obstructed=true` casi constante — dato inutilizable para la memoria hasta esta corrección. |
+| **Cuarta llamada gRPC por ciclo de polling** | ⚠️ CONTRA | Overhead adicional de `grpcurl` como subproceso (mismo patrón que `get_status`/`get_history`) — aceptable dado el intervalo de 60s (RF-01), igual criterio que la enmienda de mecanismo de ADR-01. |
+| **Semántica dispersa de `alerts` sin verificar contra un evento real positivo** | ⚠️ CONTRA | El caso `obstructed=True` está testeado con datos sintéticos (`tests/test_acquisition.py`), no contra una obstrucción real capturada en el LIT — riesgo bajo pero real de que la inferencia "ausencia=False" no se sostenga en algún caso de borde del firmware. |
+| **`schema.py` sin cambios de tipo/rango** | ✅ PRO | `is_obstructed` sigue siendo `Optional[bool]` — no fuerza bump de `SCHEMA_VERSION`, a diferencia de ADR-17. |
+
+## ADR-20 — Bridge MQTT Saliente hacia el Broker Compartido de la VM de Cátedra
+
+| **Atributo** | **Valor** |
+| --- | --- |
+| **ID** | ADR-20 |
+| **Estado** | Propuesto |
+| **Fecha** | Agosto 2026 |
+| **Depende de** | ADR-04, ADR-09 |
+| **Impacta en** | ADR-14 |
+
+### Contexto y Motivación
+
+El director (Santiago) ofreció una VM de la cátedra (`35.224.141.221`, IP pública) para
+alojar infraestructura compartida entre este módulo y el de Fede, con el objetivo
+concreto de exponer un front público con QR (ver `docs/PROGRESS.md`, visita del
+20/08/2026). `starlink-station-stack` (repo neutral de integración) ya desplegó ahí un
+broker Mosquitto con autenticación (`docs/01_ADR.md` de ese repo) — el problema que
+faltaba resolver era cómo hacer que la telemetría real de este módulo (que se genera en
+la RPi5, dentro de la red del LIT) llegue a ese broker compartido.
+
+El primer intento (sesión anterior, 19/8) falló: la RPi5 no alcanzaba la VM por el
+puerto `5883`. Diagnosticado en esta visita: **no es un problema de conectividad, es de
+routing**. La red del LIT/UNC solo permite salida a internet por los puertos 80/443
+(confirmado contra un servidor de control neutral, `portquiz.net`, que rechaza el mismo
+tráfico por el mismo camino). Pero la RPi5 tiene un segundo uplink: el propio terminal
+Starlink que está midiendo, conectado por `eth0`, con salida a internet sin esa
+restricción — la ruta por defecto simplemente no lo estaba usando (métrica de `wlan0`
+más baja que la de `eth0`).
+
+El código Python de este módulo (`src/common/mqtt.py`) no soporta autenticación MQTT
+(nunca hizo falta, el broker local es `allow_anonymous true` por diseño — ADR-04/ADR-14),
+pero el broker de la VM exige credenciales. Cambiar `src/` para soportar dos brokers con
+credenciales distintas (local sin auth, remoto con auth) hubiera acoplado la lógica de
+publicación del extractor/mock a una decisión de despliegue que no le corresponde.
+
+### Alternativas Consideradas
+
+| **Aspecto** | **Alt. A — `src/common/mqtt.py` publica a ambos brokers** | **Alt. B — Bridge de Mosquitto (broker→broker) ✅** | **Alt. C — Apuntar `MQTT_HOST` directo a la VM, sin broker local** |
+| --- | --- | --- | --- |
+| Cambios en `src/` | ⚠️ Requiere soportar credenciales opcionales, reintentos y buffer offline para un segundo destino — duplica lógica que Mosquitto ya resuelve | ✅ Ninguno | ⚠️ Requiere agregar `username_pw_set` (ADR-04 nunca lo necesitó) |
+| Riesgo sobre la corrida de CA-02 en curso | ⚠️ Cualquier bug en la lógica nueva de publicación doble puede afectar la ingesta local que ya lleva 5+ días sin errores | ✅ El pipeline local (mock/acquisition → broker local → consumer) no se toca | ❌ Pierde el broker local (`allow_anonymous`, sin latencia de red) como fuente para el consumer/backend que corren en la misma RPi5 |
+| Resiliencia ante caída de la VM/ruta a internet | ⚠️ A programar a mano | ✅ Mosquitto ya maneja reconexión y `cleansession false` para el bridge, mismo patrón que cualquier cliente | ❌ Sin broker local, una caída de la VM tumba la ingesta completa, no solo la replicación |
+| Complejidad operativa | ⚠️ Media (código nuevo) | ⚠️ Media (config de bridge + credenciales fuera del repo) | ✅ Baja, pero al costo de acoplar toda la pila local a la disponibilidad de la VM |
+
+### Decisión
+
+**✅ Decisión: Alternativa B — Bridge de Mosquitto (broker local → broker de la VM)**
+
+`services/broker/mosquitto.conf` agrega `include_dir /mosquitto/config/conf.d`, y el
+bridge real (`connection vm-bridge`, `topic starlink/# out 1`, `bridge_protocol_version
+mqttv50`) vive en `services/broker/conf.d/bridge.conf` — **no versionado** (repo público,
+`mosquitto.conf` no soporta variables de entorno para inyectar credenciales en runtime).
+Se agrega `services/broker/conf.d/bridge.conf.example` como plantilla versionada.
+
+El bridge es `out` únicamente (no `both`): el broker local sigue siendo la única fuente
+de verdad para el consumer/backend que corren en la misma RPi5 — la VM recibe una copia,
+no participa en el pipeline local.
+
+**Ruta de red**: `ip route add 35.224.141.221 via 100.64.0.1 dev eth0` (persistida vía
+NetworkManager en la conexión del uplink Starlink) — quirúrgica, solo ese destino sale
+por `eth0`; todo el resto del tráfico de la RPi5 (incluido el propio SSH de gestión)
+sigue por `wlan0` sin cambios.
+
+### Pros y Contras
+
+| **Aspecto** | **PRO ✅ / CONTRA ⚠️** | **Detalle** |
+| --- | --- | --- |
+| **Desbloquea el front público con QR pedido por el director** | ✅ PRO | Es el primer paso concreto para que la telemetría real llegue a infraestructura con IP pública. |
+| **Cero cambios en `src/`** | ✅ PRO | Mosquitto resuelve auth/reconexión/buffer del lado del broker, sin acoplar el código de la aplicación a una decisión de despliegue. |
+| **La telemetría de red sale por el mismo enlace que está midiendo** | ⚠️ CONTRA | Consideración metodológica, no técnica: el tráfico del bridge (~500 bytes cada 60s, despreciable frente al ancho de banda del enlace) viaja por el propio Starlink bajo medición. Documentado para la memoria, no afecta la validez de las métricas (el tráfico de control es órdenes de magnitud menor al de la medición). |
+| **Ruta de red no estándar, dependiente de que la RPi5 mantenga ambos uplinks** | ⚠️ CONTRA | Si el enlace Starlink cae, el bridge también cae (aunque el pipeline local sigue funcionando sin él) — es una dependencia nueva, documentada, no una falla silenciosa. |
+| **Credenciales fuera del repo (gitignored)** | ✅ PRO | Mismo patrón ya validado en `starlink-station-stack/infra/mosquitto-vm/` (passwordfile) — consistente, no una solución ad-hoc nueva. |
+
 # APÉNDICES
 
 ## Apéndice A — Mapa de Dependencias entre ADRs
 
-El siguiente grafo muestra las relaciones de dependencia entre las 18 decisiones documentadas. Una flecha ADR-X → ADR-Y indica que ADR-Y depende de la decisión tomada en ADR-X.
+El siguiente grafo muestra las relaciones de dependencia entre las 20 decisiones documentadas. Una flecha ADR-X → ADR-Y indica que ADR-Y depende de la decisión tomada en ADR-X.
 
 | **ADR Base** | **ADRs que dependen de él** |
 | --- | --- |
-| ADR-01 (Serialización JSON+Pydantic) | ADR-04, ADR-06, ADR-07, ADR-08, ADR-11, ADR-16, ADR-17, ADR-18 |
+| ADR-01 (Serialización JSON+Pydantic) | ADR-04, ADR-06, ADR-07, ADR-08, ADR-11, ADR-16, ADR-17, ADR-18, ADR-19 |
 | ADR-02 (Sensor BME280 digital) | ADR-03, ADR-05, ADR-07 |
 | ADR-03 (ESP32 como Gateway) | ADR-04, ADR-05, ADR-07 |
-| ADR-04 (MQTT + ORM) | ADR-09, ADR-10, ADR-12 |
+| ADR-04 (MQTT + ORM) | ADR-09, ADR-10, ADR-12, ADR-20 |
 | ADR-05 (Python + C++) | ADR-06, ADR-07, ADR-08, ADR-09, ADR-12 |
 | ADR-06 (Mock Starlink Random Walk) | ADR-16, ADR-17, ADR-18 |
-| ADR-09 (Mosquitto MQTT) | ADR-10, ADR-12 |
+| ADR-09 (Mosquitto MQTT) | ADR-10, ADR-12, ADR-20 |
 | ADR-10 (Database per Service) | ADR-11, ADR-12, ADR-13 |
 | ADR-11 (TimescaleDB) | ADR-12, ADR-13 |
 | ADR-12 (Docker) | Todos los ADRs son impactados por la contenerización |
@@ -1267,6 +1411,8 @@ Este apéndice consolida las alternativas que fueron evaluadas seriamente pero n
 | Ambos booleanos (`snr_low` + `snr_above_floor`) | ADR-17 | `isSnrAboveNoiseFloor` es casi redundante con `packet_loss_pct`/`is_obstructed` ante un corte total de señal; no justifica el campo extra. |
 | Sub-objeto `alignment` anidado en el payload | ADR-18 | `network_metrics` es plana por naturaleza (columnas SQL); anidar obliga al consumer a aplanar sin ninguna ganancia real. |
 | Exponer `attitudeEstimationState` | ADR-18 | Enum string de estado interno del algoritmo de tracking, sin uso analítico directo para el objetivo de correlación clima-red del PI. |
+| Subir el umbral de `obstructionStats.fractionObstructed` en vez de cambiar de fuente | ADR-19 | Sigue siendo una fracción acumulada desde que arrancó la ventana de validación de la antena, no el estado instantáneo — cualquier umbral es arbitrario y no representa el momento de la medición. |
+| Dejar `is_obstructed` en `null` siempre (real) | ADR-19 | Pierde el campo por completo para el módulo real, contradice RF-03 y descarta un correlato directo con el objetivo del PI. |
 
 ## Comments
 
