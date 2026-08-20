@@ -614,7 +614,7 @@ Además, el proceso de población de la DB no debe ser un artefacto de desarroll
 
 **✅ Decisión: Alternativa B — Ingesta Orgánica End-to-End con variable TIME_WARP_FACTOR**
 
-Los mocks operan con una variable de entorno TIME_WARP_FACTOR (ej. 60). Un factor de 60 significa que los mocks publican 1 msg/s en lugar de 1 msg/min, generando 1 hora de datos en 1 minuto real. El consumer procesa estos mensajes usando exactamente el mismo código de producción. En 30 minutos se pueden cargar 30 días de historia[^c9].
+Los mocks operan con una variable de entorno TIME_WARP_FACTOR (ej. 60). Un factor de 60 significa que los mocks publican 1 msg/s en lugar de 1 msg/min, generando 1 hora de datos en 1 minuto real. El consumer procesa estos mensajes usando exactamente el mismo código de producción. En 30 minutos se pueden cargar 30 días de historia[^c9] — a razón de 1 msg/min simulado (30 días × 1440 msg/día = 43.200 mensajes), con las 17 columnas numéricas de `network_metrics` (`docs/06_DER.md` §3.1) eso son unos **~9-15 MB sin comprimir** (estimación analítica a partir del ancho de fila real de la tabla, no una medición `du -sh` sobre datos generados — la compresión columnar de ADR-11 activa automáticamente a partir de los 7 días, así que el número final en disco es menor). Medición real todavía pendiente de correr el backfill de verdad (ver Semana 21, sin ejecutar, `docs/PROGRESS.md`).
 
 ### Pros y Contras
 
@@ -623,8 +623,8 @@ Los mocks operan con una variable de entorno TIME_WARP_FACTOR (ej. 60). Un facto
 | **Validación E2E completa** | ✅ PRO | Prueba que todos los chunks de TimescaleDB se crean correctamente, que los índices funcionan, y que la política de compresión se activa en datos > 7 días. |
 | **Prueba de write throughput** | ✅ PRO | Con factor 60, el consumer recibe ~3 msg/s. Un stress test con factor 300 (5 msg/s) valida el rendimiento del sistema bajo carga pico. |
 | **Cero deuda técnica** | ✅ PRO | No existen scripts SQL extra que mantener. El código de los mocks es el único generador de datos sintéticos. |
-| **Complejidad de temporalidad** | ⚠️ CONTRA | Los timestamps en los mensajes deben ser sintéticos (pasado ajustado), no el tiempo real del sistema. Requiere que el mock genere timestamps calculados hacia atrás.[^c10] |
-| **Carga en la RPi5** | ⚠️ CONTRA | Un factor muy alto (> 200[^c11]) puede saturar el CPU del RPi5. En desarrollo local (PC), sin limitación práctica. |
+| **Complejidad de temporalidad** | ⚠️ CONTRA | Los timestamps en los mensajes deben ser sintéticos (pasado ajustado), no el tiempo real del sistema. Requiere que el mock genere timestamps calculados hacia atrás.[^c10] Implementado tal cual: `sim_time` arranca en `now - 30 días` cuando `time_warp_factor > 1`, y avanza 60s simulados por cada `interval_s = 60/time_warp_factor` segundos reales, acotado a nunca superar `now` (`src/mock_starlink/mock.py:49,81,228`). |
+| **Carga en la RPi5** | ⚠️ CONTRA | Un factor muy alto (> 200[^c11]) puede saturar el CPU del RPi5 — **sin base empírica medida todavía**: no se corrió ningún test de estrés real contra la RPi5 que confirme ese umbral de 200 en particular (el stress test planeado usa `TIME_WARP_FACTOR=3600`, ver Semana 21 de `docs/PROGRESS.md`, sin ejecutar). El número queda como estimación no verificada hasta correr ese test. |
 
 # FASE 3 — Persistencia y Contenerización
 
@@ -1273,14 +1273,32 @@ Este apéndice consolida las alternativas que fueron evaluadas seriamente pero n
 ### Pendientes
 
 [^c9] ALDANA MICAELA PAVET GARCÍA: Cuanto espacio demanda eso, rever mensajes a probar
+      — **Parcial (19-20/8)**: estimación analítica agregada donde estaba el
+      comentario (~9-15 MB sin comprimir para 30 días). Sigue faltando la medición
+      real (`du -sh` sobre el volumen después de correr el backfill de verdad,
+      Semana 21 — sin ejecutar todavía).
 [^c13] SANTIAGO MARTIN HENN: parte del mismo
-[^c10] ALDANA MICAELA PAVET GARCÍA: Sacar o explicar bien
-[^c7] ALDANA MICAELA PAVET GARCÍA: Mock para validar funcionamiento antes de conectar
-[^c8] ALDANA MICAELA PAVET GARCÍA: No es necesario por objetivo
+[^c8] ALDANA MICAELA PAVET GARCÍA: No es necesario por objetivo — sigue siendo una
+      decisión de alcance de Pavet García (¿vale la pena que el mock simule
+      comportamiento dinámico o alcanzaba con algo más simple para el objetivo del
+      PI?), no algo que se resuelva con evidencia — pendiente de que ella lo decida.
 [^c12] SANTIAGO MARTIN HENN: No?
-[^c11] ALDANA MICAELA PAVET GARCÍA: 200 que?
+[^c11] ALDANA MICAELA PAVET GARCÍA: 200 que? — **Aclarado (19-20/8)** dónde estaba el
+      comentario: no hay base empírica real para el umbral "200", queda marcado como
+      estimación sin verificar hasta correr el stress test real (Semana 21).
+      **Sigue pendiente** correr ese test para confirmar o corregir el número.
 
 ### Resueltos
+
+[^c7] ALDANA MICAELA PAVET GARCÍA: Mock para validar funcionamiento antes de conectar
+      — **Resuelto (19-20/8)**: la antena real ya está conectada y funcionando desde
+      el 14/8/2026 (`docs/PROGRESS.md`, semana 10) — el mock cumplió exactamente el
+      propósito que describía este comentario, validar la pila completa antes de
+      tener hardware real.
+[^c10] ALDANA MICAELA PAVET GARCÍA: Sacar o explicar bien — **Resuelto (19-20/8)**: la
+      frase original era correcta, solo faltaba explicarla — se agregó la referencia
+      exacta al código real que implementa el cálculo hacia atrás
+      (`src/mock_starlink/mock.py:49,81,228`), donde estaba el comentario.
 
 [^c14] SANTIAGO MARTIN HENN: poner algo de que las apps que desarrollan van a ser "stateless" — resuelto: aclarado en el Contexto de ADR-12 que es "stateless" a nivel de infraestructura (12-factor, sin volúmenes locales persistentes), lo cual no contradice que el mock de Starlink sea "stateful" a nivel de lógica de generación de datos en memoria (ADR-06).
 [^c5] ALDANA MICAELA PAVET GARCÍA: No queda claro, para qué? (ver `docs/PROGRESS.md`, fila `net_health/iperf_test` de ADR-04) — resuelto: fuera del "Alcance técnico" de `CLAUDE.md` §1.1 (solo telemetría pasiva vía gRPC); la fila se eliminó de la tabla de tópicos de ADR-04. De agregarse iPerf3 activo en el futuro, correspondería a `network_tests` (DER §3.2), no a `network_metrics`.
