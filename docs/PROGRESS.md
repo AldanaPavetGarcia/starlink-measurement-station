@@ -102,8 +102,19 @@ documentado en §Semana 10, implementación pendiente de la próxima visita).
 
 ## Pendiente — revisar con director/co-director
 
-Todos los ADR siguen "Propuesto" (nunca "Aceptado") — los siguientes puntos nuevos
-de esta sesión son candidatos concretos a confirmar, no solo formalidad:
+**Nota 19/08/2026 — intento de pasar el Estado de los 18 ADR a "Aceptado":** según
+Pavet García, el director (Henn) ya había dado por aprobados los 18 ADR de palabra en
+una instancia presencial previa al inicio del repo (~27/06/2026). Se intentó reflejar
+eso en `docs/05_ADR.md` (Estado: Propuesto → Aceptado) pero el hook de enforcement de
+`adr-check` lo bloqueó: esa skill exige explícitamente que el campo Estado a "Aceptado"
+lo escriba/confirme el director sobre el propio documento, no que se infiera de un
+relato en el commit — sin importar que la aprobación verbal haya sido real. Se revirtió
+y **los 18 ADR siguen en "Propuesto"** en `docs/05_ADR.md`. Queda como constancia
+informal acá, pendiente de que el director lo confirme por escrito (email, comentario en
+el doc, o editándolo él mismo) para poder aplicar el cambio.
+
+Los siguientes puntos nuevos de esta sesión son candidatos concretos a confirmar aparte,
+no solo formalidad:
 
 - **ADR-17 (`snr_db`→`snr_low`) y bump de `SCHEMA_VERSION` a 1.1**: es el primer
   cambio de tipo incompatible del esquema del proyecto. Vale la pena que el
@@ -348,6 +359,40 @@ habiendo un único retained por tópico). Aplicado en `src/mock_starlink/__main_
 `src/acquisition/__main__.py`, y documentado como enmienda en ADR-03/ADR-04
 (`docs/05_ADR.md`) — ver detalle ahí. **Pendiente del lado de Fede**: actualizar su
 `will_set()` de `system/status/<node_id>` a `meteo/status/<node_id>`.
+
+### Semántica `source`/`producer` en `env_metrics` — decisión parcial (19/8/2026)
+
+El mismatch anotado el 11/8 (`source` fijo `"local_sensor"` + `producer` distinguiendo
+mock/real, sin calzar con el CHECK constraint de una sola columna) quedó sin cerrar
+después de la prueba del 14/8 — nunca se escribió por ningún lado, aunque había una
+conversación con Fede al respecto. Confirmado hoy el sentido de esa conversación:
+
+- **`source`** = identidad puntual del componente que generó el dato (distingue
+  mock de hardware real): `mock_bme280` / `esp32_bme280` / `mock_api` /
+  `api_open_meteo` / `api_owm` / `api_smn`.
+- **`producer`** = categoría del origen: `antenna` / `sensor` / `api`.
+
+Esto invierte lo que hoy hace el código de Fede (`source: "local_sensor"` —
+categoría, no identidad — y `producer: "mock_bme280"` — identidad, no categoría) y
+tampoco coincide con el CHECK constraint actual de `env_metrics.source`
+(`docs/06_DER.md`, una sola columna mezclando identidad y categoría) ni con
+`EnvPayloadIn`/`EnvSource` (`docs/07_API_REST.md` §9.2, que además tiene un tercer
+campo, `source_module`, a nivel de envelope — nunca llegó a tener columna propia en
+el DER).
+
+**Pendiente de resolver — no se tocó `docs/06_DER.md` ni `docs/07_API_REST.md`
+todavía, queda para cuando se decida con Fede:**
+
+1. **Dónde va `producer`**: ¿adentro de `metrics` (como ya lo tiene el código de
+   Fede — menos cambios de su lado) o afuera, a nivel de envelope del mensaje (como
+   `source_module` en el `EnvPayloadIn` ya escrito)?
+2. **Qué hacer con `source_module`** (`docs/07_API_REST.md` §9.2, `POST /ingest/env`):
+   ¿se renombra a `producer` y se alinea a esta decisión, o se trata como un diseño
+   viejo/borrador a reemplazar directamente?
+3. Lo que sí es seguro independientemente de 1 y 2: `env_metrics` necesita una
+   columna `producer` nueva — hoy solo tiene `source` — y el CHECK constraint de
+   `source` pasa a validar solo los 6 valores de identidad de arriba (no mezclar con
+   categoría).
 
 ### Revisión del repo de Fede — `tesis-sensor-node` (11/8/2026)
 
@@ -1232,3 +1277,23 @@ para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
 - [ ] Correcciones finales sobre tu módulo según feedback del director/co-director
 
 > 🔗 Milestone: cierre del Proyecto Integrador.
+
+### 2026-08-19 — Intento de pasar el Estado de los 18 ADR a "Aceptado" (revertido)
+
+Se intentó cambiar el campo "Estado" de los 18 ADR (`docs/05_ADR.md`, tabla resumen §2
+y el atributo `Estado` de cada entrada individual) de "Propuesto" a "Aceptado", a pedido
+de Pavet García, quien indicó que el director (Henn) ya los había dado por aprobados en
+una instancia presencial previa al inicio del repo (~27/06/2026).
+
+El hook de enforcement de la skill `adr-check` bloqueó el commit: su regla es explícita
+("Nunca cambiar el campo 'Estado' de un ADR a 'Aceptado' — eso lo decide el director")
+y no distingue el motivo — el registro formal de "Aceptado" tiene que originarse en una
+acción explícita del director sobre el propio documento, no en un commit del agente que
+infiere la aprobación a partir de lo que cuenta el alumno. El cambio se revirtió; **los
+18 ADR siguen en "Propuesto"** en `docs/05_ADR.md`, sin tocar contenido de decisión,
+contexto ni las enmiendas de campo ya documentadas (grpcurl en ADR-01, tópico status por
+dominio en ADR-03/04, ADR-16/17/18).
+
+Ver "Pendiente — revisar con director/co-director" (arriba) para la nota de constancia
+informal y el camino para destrabarlo (confirmación escrita del director, o que él mismo
+edite el campo).
