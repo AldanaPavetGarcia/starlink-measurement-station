@@ -1297,3 +1297,40 @@ dominio en ADR-03/04, ADR-16/17/18).
 Ver "Pendiente — revisar con director/co-director" (arriba) para la nota de constancia
 informal y el camino para destrabarlo (confirmación escrita del director, o que él mismo
 edite el campo).
+
+### 2026-08-19/20 — Broker MQTT compartido desplegado en la VM de la cátedra
+
+Ver `docs/01_ADR.md` de `starlink-station-stack` para la decisión completa (VM aloja
+solo el broker, resto sigue en la RPi5 — RAM insuficiente ahí para la pila completa,
+~1GB). Ejecutado y verificado hoy:
+
+- Docker + Compose instalados en la VM (Debian 13/trixie — sin `docker-compose-plugin`
+  en sus repos, se usó el paquete `docker-compose`, que igual instala Compose v2.26.1).
+- Broker Mosquitto levantado con auth (`allow_anonymous false`), puerto externo `5883`.
+- **2 bugs reales encontrados y corregidos en el despliegue** (no estaban probados
+  hasta hoy, quedaron en `starlink-station-stack` commit `57aa2c5`):
+  1. El healthcheck no pasaba credenciales → fallaba "not authorised" en loop infinito,
+     contenedor nunca pasaba de `health: starting`. Corregido con
+     `MQTT_HEALTHCHECK_USER`/`PASSWORD` vía `.env` propio de esa carpeta.
+  2. El `passwordfile` con permisos `600` (dueño `federico.isaia.soria`, el usuario del
+     host) no era legible por el proceso Mosquitto dentro del contenedor (UID distinto,
+     `1883`) → "Unable to open pwfile", el contenedor crasheaba en loop. Se dejó en
+     `644` como workaround funcional; **candidato a mejorar más adelante** (sacar
+     el `:ro` de los mounts de `mosquitto.conf`/`passwordfile` para que el propio
+     entrypoint del `chown` interno funcione, en vez de depender de permisos world-readable).
+- **Verificado end-to-end desde afuera de la VM** (mi laptop, por internet, con un
+  contenedor `eclipse-mosquitto` efímero): `mosquitto_pub`/`mosquitto_sub` con
+  credenciales funcionan; sin credenciales, la conexión es rechazada
+  ("not authorised") — confirma que la postura de seguridad (ADR-14, extendida acá)
+  se cumple.
+
+**Bloqueado — no pude completarlo yo**: apuntar la RPi5 al broker de la VM
+(`MQTT_HOST=35.224.141.221`, `MQTT_PORT=5883` + credenciales en su `.env`, después
+`docker compose restart acquisition consumer`). La RPi5 (`leonode-rpi`,
+`172.18.147.143`) no es alcanzable desde esta sesión — "No route to host", es la red
+del LIT y esta laptop no tiene una ruta hacia ahí ahora mismo (sin Tailscale local
+tampoco, desinstalado antes en esta misma sesión a pedido de la usuaria). Pendiente de
+que alguien lo haga estando en esa red, o de conseguir otra vía de acceso.
+
+Ver también `starlink-station-stack/docs/INTEGRATION_CHECKLIST.md` para el estado
+consolidado (ítems 1 y 2 del checklist pasan a ✅ con esto).
