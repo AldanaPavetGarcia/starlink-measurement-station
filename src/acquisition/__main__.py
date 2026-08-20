@@ -48,9 +48,18 @@ def _poll_once(addr: str, node_id: str, since_ns: int, logger) -> tuple[dict, in
         logger.warning("no se pudo consultar la antena, se salta este ciclo", extra={"rc": str(exc)})
         return None, since_ns
 
+    try:
+        diagnostics = grpc_client.get_diagnostics(addr)
+    except GrpcClientError as exc:
+        # No tumba el ciclo entero -- is_obstructed queda en None para este
+        # payload en vez de perder latencia/throughput/handovers por una
+        # llamada que sólo aporta un campo (ver starlink_extractor.py).
+        logger.warning("no se pudo consultar diagnostics, is_obstructed queda en None", extra={"rc": str(exc)})
+        diagnostics = None
+
     now = datetime.now(timezone.utc)
     now_ns = int(now.timestamp() * 1_000_000_000)
-    metrics = build_metrics(status, history, since_ns)
+    metrics = build_metrics(status, history, since_ns, diagnostics)
 
     payload = {
         "schema_version": SCHEMA_VERSION,

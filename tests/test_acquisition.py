@@ -14,7 +14,7 @@ import subprocess
 
 import pytest
 
-from acquisition.grpc_client import GrpcClientError, get_status
+from acquisition.grpc_client import GrpcClientError, get_diagnostics, get_status
 from acquisition.starlink_extractor import build_metrics, count_handovers, derive_jitter_loss, map_status
 
 # ---------------------------------------------------------------------------
@@ -27,9 +27,6 @@ STATUS_FIXTURE = {
         "downlinkThroughputBps": "668000",  # protobuf int64 como string
         "uplinkThroughputBps": "173000",
         "isSnrAboveNoiseFloor": True,  # snr_low = not isSnrAboveNoiseFloor (confirmado contra antena real)
-        # currentlyObstructed NO existe en el firmware real (confirmado 12/08/2026) --
-        # solo fractionObstructed (fracción continua 0-1). is_obstructed = fraction > 0.
-        "obstructionStats": {"fractionObstructed": 0.0},
         "alignmentStats": {
             "tiltAngleDeg": 2.1,
             "boresightAzimuthDeg": -175.7,  # rango firmado -180..180, confirmado 12/08/2026
@@ -40,6 +37,12 @@ STATUS_FIXTURE = {
         },
     }
 }
+
+# dishGetDiagnostics.alerts usa serialización dispersa (proto3): solo
+# aparecen las claves en `true` -- confirmado contra la antena real
+# (`alerts: {}` cuando no hay ningún alerta activo, 20/08/2026).
+DIAGNOSTICS_NO_OBSTRUCCION = {"dishGetDiagnostics": {"alerts": {}}}
+DIAGNOSTICS_OBSTRUIDA = {"dishGetDiagnostics": {"alerts": {"obstructed": True}}}
 
 HISTORY_FIXTURE = {
     "dishGetHistory": {
@@ -60,7 +63,7 @@ HISTORY_FIXTURE = {
 # ---------------------------------------------------------------------------
 
 def test_map_status_campos_directos():
-    m = map_status(STATUS_FIXTURE)
+    m = map_status(STATUS_FIXTURE, DIAGNOSTICS_NO_OBSTRUCCION)
     assert m["latency_ms"] == 24.5
     assert m["throughput_down_bps"] == 668000.0
     assert m["throughput_up_bps"] == 173000.0
@@ -78,15 +81,24 @@ def test_map_status_snr_low_es_el_inverso_de_snr_above_noise_floor():
     assert map_status(fixture)["snr_low"] is True
 
 
-def test_map_status_is_obstructed_true_con_fraccion_positiva():
-    """El firmware real no tiene obstructionStats.currentlyObstructed, solo
-    fractionObstructed (fracción continua) -- umbral bajo (>0) a propósito,
-    cualquier obstrucción detectada cuenta (confirmado 12/08/2026)."""
-    fixture = {"dishGetStatus": {"obstructionStats": {"fractionObstructed": 0.0006}}}
-    assert map_status(fixture)["is_obstructed"] is True
+def test_map_status_is_obstructed_true_con_alert_activo():
+    """dishGetDiagnostics.alerts.obstructed=True es la única señal de estado
+    *actual* de obstrucción (corregido 20/08/2026, ver docstring del
+    módulo) -- distinto de obstructionStats.fractionObstructed, que es
+    acumulado y ya no se usa para esto."""
+    assert map_status(STATUS_FIXTURE, DIAGNOSTICS_OBSTRUIDA)["is_obstructed"] is True
 
 
-def test_map_status_is_obstructed_none_sin_obstruction_stats():
+def test_map_status_is_obstructed_false_cuando_alerts_no_tiene_la_clave():
+    """Serialización dispersa: alerts={} (sin ningún alerta activo) significa
+    is_obstructed=False, no None -- el objeto diagnostics sí llegó."""
+    assert map_status(STATUS_FIXTURE, DIAGNOSTICS_NO_OBSTRUCCION)["is_obstructed"] is False
+
+
+def test_map_status_is_obstructed_none_sin_diagnostics():
+    """Sin diagnostics (llamada a get_diagnostics falló ese ciclo), no se
+    inventa un valor -- None, no el proxy viejo de fractionObstructed."""
+    assert map_status(STATUS_FIXTURE)["is_obstructed"] is None
     assert map_status({"dishGetStatus": {}})["is_obstructed"] is None
 
 
@@ -159,7 +171,7 @@ def test_count_handovers_historial_vacio():
 # ---------------------------------------------------------------------------
 
 def test_build_metrics_tiene_las_claves_esperadas():
-    metrics = build_metrics(STATUS_FIXTURE, HISTORY_FIXTURE, since_ns=0)
+    metrics = build_metrics(STATUS_FIXTURE, HISTORY_FIXTURE, since_ns=0, diagnostics=DIAGNOSTICS_NO_OBSTRUCCION)
     assert set(metrics.keys()) == {
         "latency_ms", "jitter_ms", "packet_loss_pct", "throughput_down_bps",
         "throughput_up_bps", "snr_low", "is_obstructed", "satellite_count",
@@ -169,6 +181,13 @@ def test_build_metrics_tiene_las_claves_esperadas():
         "attitude_uncertainty_deg",
     }
     assert metrics["handover_count"] == 1
+    assert metrics["is_obstructed"] is False
+
+
+def test_build_metrics_sin_diagnostics_deja_is_obstructed_en_none():
+    """`diagnostics` es opcional (default None) -- no rompe callers viejos."""
+    metrics = build_metrics(STATUS_FIXTURE, HISTORY_FIXTURE, since_ns=0)
+    assert metrics["is_obstructed"] is None
 
 
 def test_build_metrics_pasa_la_validacion_pydantic():
@@ -178,7 +197,7 @@ def test_build_metrics_pasa_la_validacion_pydantic():
 
     from mock_starlink.schema import SCHEMA_VERSION, StarlinkPayloadIn
 
-    metrics = build_metrics(STATUS_FIXTURE, HISTORY_FIXTURE, since_ns=0)
+    metrics = build_metrics(STATUS_FIXTURE, HISTORY_FIXTURE, since_ns=0, diagnostics=DIAGNOSTICS_NO_OBSTRUCCION)
     payload = {
         "schema_version": SCHEMA_VERSION,
         "node_id": "lit-cordoba-01",
@@ -241,3 +260,17 @@ def test_get_status_json_invalido_lanza_grpc_client_error(monkeypatch):
     )
     with pytest.raises(GrpcClientError, match="JSON válido"):
         get_status("192.168.100.1:9200")
+
+
+def test_get_diagnostics_parsea_stdout_json_y_pide_el_request_correcto(monkeypatch):
+    import json as json_mod
+
+    captured = {}
+
+    def _fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return _FakeCompletedProcess(returncode=0, stdout=json_mod.dumps(DIAGNOSTICS_OBSTRUIDA))
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    assert get_diagnostics("192.168.100.1:9200") == DIAGNOSTICS_OBSTRUIDA
+    assert '{"get_diagnostics": {}}' in captured["cmd"]

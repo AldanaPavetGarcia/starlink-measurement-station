@@ -17,13 +17,30 @@ Mapeo confirmado contra la antena real:
 - latency_ms          <- dishGetStatus.popPingLatencyMs (directo)
 - throughput_down_bps  <- dishGetStatus.downlinkThroughputBps (directo)
 - throughput_up_bps    <- dishGetStatus.uplinkThroughputBps (directo)
-- is_obstructed        <- `obstructionStats.fractionObstructed > 0` -- el
-                           firmware no expone un booleano currently_obstructed
-                           (confirmado ausente 12/08/2026), solo la fracción
-                           continua de muestras recientes obstruidas. Umbral
-                           bajo (>0, no >0.01) a propósito: cualquier
-                           obstrucción detectada cuenta como señal de alerta
-                           temprana, misma semántica que "currently obstructed".
+- is_obstructed        <- **corregido 20/08/2026** (bug real encontrado en
+                           visita al LIT): `dishGetDiagnostics.alerts.obstructed`
+                           -- el único flag de estado *actual*. La versión
+                           anterior usaba `obstructionStats.fractionObstructed
+                           > 0` de `get_status`, pero ese campo es una
+                           fracción ACUMULADA desde que arrancó la ventana de
+                           validación (`validS`, horas/días de uptime), no el
+                           estado ahora mismo -- con umbral `>0` daba
+                           `is_obstructed=True` casi siempre una vez que hubo
+                           cualquier obstrucción alguna vez (medido: 8358 de
+                           8359 muestras reales en 6 días, con
+                           `fractionObstructed` de apenas 0.04% acumulado --
+                           no era obstrucción real, era el proxy equivocado).
+                           `alerts` usa serialización JSON dispersa (proto3,
+                           confirmado contra la antena real): solo aparecen
+                           las claves en `true`, así que la ausencia de
+                           `"obstructed"` en el dict significa `false`, no
+                           "sin dato" -- salvo que falte el objeto
+                           `dishGetDiagnostics` entero (llamada no
+                           disponible), ahí no hay señal confiable y se
+                           devuelve `None`. **Sin verificar todavía contra un
+                           evento de obstrucción real** (la antena no tuvo
+                           ninguno durante la visita) -- confirmar la próxima
+                           vez que haya nubes bajas/algo bloqueando la vista.
 - satellite_count      <- siempre None (confirmado ausente en get_status Y
                            get_diagnostics en este hardware/firmware, dos
                            corridas independientes -- no es un bug del mapeo)
@@ -57,21 +74,31 @@ def _num(value: Any) -> Optional[float]:
         return None
 
 
-def map_status(status: dict) -> dict:
-    """Campos derivables directamente de un único `get_status` (sin estado
-    entre polls)."""
+def _obstructed_from_diagnostics(diagnostics: Optional[dict]) -> Optional[bool]:
+    """Ver la nota de `is_obstructed` en el docstring del módulo. `None` si
+    no se pudo llamar a `get_diagnostics` en este ciclo (antena no
+    disponible momentáneamente) -- no se inventa un valor."""
+    if diagnostics is None:
+        return None
+    alerts = (diagnostics.get("dishGetDiagnostics", {}) or {}).get("alerts", {}) or {}
+    return bool(alerts.get("obstructed", False))
+
+
+def map_status(status: dict, diagnostics: Optional[dict] = None) -> dict:
+    """Campos derivables directamente de `get_status` + `get_diagnostics`
+    (sin estado entre polls). `diagnostics` es opcional para no romper
+    callers/tests que sólo tienen `get_status` -- sin él, `is_obstructed`
+    queda en `None` en vez de inventar un valor con el proxy viejo."""
     s = status.get("dishGetStatus", {}) or {}
-    obstruction = s.get("obstructionStats", {}) or {}
     alignment = s.get("alignmentStats", {}) or {}
 
     snr_above_floor = s.get("isSnrAboveNoiseFloor")
-    fraction_obstructed = _num(obstruction.get("fractionObstructed"))
 
     return {
         "latency_ms": _num(s.get("popPingLatencyMs")),
         "throughput_down_bps": _num(s.get("downlinkThroughputBps")),
         "throughput_up_bps": _num(s.get("uplinkThroughputBps")),
-        "is_obstructed": (fraction_obstructed > 0) if fraction_obstructed is not None else None,
+        "is_obstructed": _obstructed_from_diagnostics(diagnostics),
         "satellite_count": None,
         "snr_low": (not snr_above_floor) if snr_above_floor is not None else None,
         "tilt_angle_deg": _num(alignment.get("tiltAngleDeg")),
@@ -124,10 +151,11 @@ def count_handovers(history: dict, since_ns: int) -> tuple[int, float]:
     return count, round(total_duration_ns / 1_000_000, 2)
 
 
-def build_metrics(status: dict, history: dict, since_ns: int) -> dict:
-    """Combina las tres fuentes en un único dict, con la misma forma que
-    `StarlinkMetrics` (schema.py) espera en `metrics`."""
-    metrics = map_status(status)
+def build_metrics(status: dict, history: dict, since_ns: int, diagnostics: Optional[dict] = None) -> dict:
+    """Combina las cuatro fuentes en un único dict, con la misma forma que
+    `StarlinkMetrics` (schema.py) espera en `metrics`. `diagnostics` es
+    opcional (ver `map_status`)."""
+    metrics = map_status(status, diagnostics)
     jitter_ms, packet_loss_pct = derive_jitter_loss(history)
     handover_count, outage_duration_ms = count_handovers(history, since_ns)
 

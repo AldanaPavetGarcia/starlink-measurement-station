@@ -64,3 +64,12 @@ def get_history(addr: str) -> dict:
     """`dishGetHistory`: series de latencia/drop rate + outages/eventLog --
     ver `starlink_extractor.derive_jitter_loss` / `count_handovers`."""
     return _call(addr, {"get_history": {}})
+
+
+def get_diagnostics(addr: str) -> dict:
+    """`dishGetDiagnostics`: incluye `alerts.obstructed`, el único flag de
+    estado *actual* de obstrucción que expone el firmware -- a diferencia de
+    `obstructionStats.fractionObstructed` en `get_status`, que es una
+    fracción acumulada desde que arrancó la ventana de validación (horas/
+    días), no el estado ahora mismo. Ver `starlink_extractor.map_status`."""
+    return _call(addr, {"get_diagnostics": {}})

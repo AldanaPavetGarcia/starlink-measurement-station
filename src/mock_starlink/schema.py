@@ -83,11 +83,14 @@ class StarlinkMetrics(BaseModel):
     )
     is_obstructed: Optional[bool] = Field(
         default=None,
-        description="`obstructionStats.fractionObstructed > 0` del get_status real "
-                    "-- el firmware no expone un booleano currently_obstructed "
-                    "(confirmado 12/08/2026), solo la fracción continua de "
-                    "muestras recientes obstruidas. Null si la API interna de la "
-                    "antena no está accesible (DER NULL='S')."
+        description="`dishGetDiagnostics.alerts.obstructed` del extractor real "
+                    "(ADR-19, corregido 20/08/2026) -- único flag de estado "
+                    "*actual*; `obstructionStats.fractionObstructed` de "
+                    "`get_status` es una fracción ACUMULADA desde que arrancó la "
+                    "ventana de validación, no sirve para 'ahora mismo' (se usaba "
+                    "así hasta esta corrección, con umbral >0 daba True casi "
+                    "siempre). Null si `get_diagnostics` no está accesible "
+                    "(DER NULL='S')."
     )
     satellite_count: Optional[int] = Field(
         default=None, ge=0,
