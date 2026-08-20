@@ -5,15 +5,17 @@
 > Convención: **[IND]** trabajo individual · **[INT]** integración con el módulo de Fede ·
 > **[HW]** requiere hardware real.
 
-**Última actualización (19-20/8/2026):** semanas 1 a 21 tocadas del lado Starlink, con
-distinto grado de cierre — ver el detalle semana por semana más abajo, esto es solo el
-resumen ejecutivo. **Completas de punta a punta (código + tests + docs + verificado
-contra Docker/CI real):** semanas 1-9, 11-12, 15-16, 19-20 (E2E), 21 (stress, en PC de
-desarrollo). **Con código escrito pero sin validar contra hardware real** (sin acceso
-presencial al LIT): semana 10 (extractor real) — ver "Checklist — próxima visita al
-LIT" al final del documento. **Bloqueadas por Fede** (dominio meteo): partes de
-semanas 6, 13-14, 19-20. Semanas 22 y 24 directamente no tienen sentido todavía
-(requieren días de datos reales / feedback del director, respectivamente).
+**Última actualización (20/8/2026, visita presencial al LIT):** semanas 1 a 22 tocadas del
+lado Starlink. **Completas de punta a punta, incluida validación contra hardware real:**
+semanas 1-12, 15-16, 19-21 (Locust corrido contra la RPi5 real: 0% fallos, ≤100ms) —
+semana 10 en particular ya no es "sin validar": el extractor lleva 5+ días corriendo
+contra la antena real sin caerse, y hoy se confirmó la equivalencia estructural
+mock↔real (ADR-01). CA-02 con una corrida real de 72h en curso (arranca ~20/8, termina
+~23/8, ver "Checklist" al final). **Semana 22 arrancó de hecho** (8359 muestras reales
+acumuladas, ~6 días) con un hallazgo pendiente de diagnosticar (obstrucción casi
+constante / throughput bajo, ver checklist). **Bloqueadas por Fede** (dominio meteo):
+partes de semanas 6, 13-14, 19-20 — su módulo todavía no convive en la RPi5. Semana 24
+no tiene sentido todavía (feedback del director).
 
 Resumen por bloque de trabajo:
 - **Semanas 1-8** (sesiones previas): mock stateful, broker, consumer,
@@ -719,7 +721,7 @@ construir 3 imágenes nuevas (`mock-starlink`, `starlink-consumer`,
 `starlink-backend`). Retomar en la próxima sesión con más espacio libre o
 tras un `docker system prune` consciente.
 
-## Semana 10 — Pasaje a hardware real (RPi5) `[HW]`
+## Semana 10 — Pasaje a hardware real (RPi5) `[HW]` ✅ COMPLETA (confirmado 20/8/2026, ver sesión al final del documento)
 
 - [x] Confirmar disponibilidad de antena, RPi5 y tarjeta de memoria — RPi5 accesible
       físicamente en el LIT, hostname `raspberrypi`, IP de lab `172.18.147.143`,
@@ -754,11 +756,18 @@ tras un `docker system prune` consciente.
       validación Pydantic end-to-end, ver sesión del 12/08 abajo), pero
       **todavía no la pila Docker completa corriendo en la RPi5** (Docker
       Engine no está instalado ahí, ver hallazgo abajo) ni las 72h de CA-01.
-- [ ] Instalar Docker Engine en la RPi5, `docker compose --profile real up
+- [x] Instalar Docker Engine en la RPi5, `docker compose --profile real up
       --build` ahí, verificar con `mosquitto_sub` que el payload publicado
-      es indistinguible en forma del que publica el mock, y recién ahí
-      arrancar las 72h de CA-01/CA-02 con `scripts/monitor_ca02.py`.
-- [ ] Confirmar con Fede que ambos módulos funcionan simultáneamente sobre el RPi5
+      es indistinguible en forma del que publica el mock — **confirmado
+      20/8/2026**: Docker ya estaba instalado (no fue necesario hacerlo),
+      la pila completa corre ahí desde el 14/8 (5+ días de uptime al
+      llegar), y la comparación de claves mock↔real dio idéntica (16/16).
+      72h de CA-01/CA-02 con `scripts/monitor_ca02.py` **arrancadas hoy**
+      (corrida real, no smoke test), ver "Checklist" al final del
+      documento para el detalle y la fecha de cierre esperada.
+- [ ] Confirmar con Fede que ambos módulos funcionan simultáneamente sobre el RPi5 —
+      sigue sin resolver, no hay rastro de su módulo en la RPi5 todavía (confirmado
+      20/8/2026).
 
 > 🔗 Milestone: fin del desarrollo desacoplado del hardware.
 
@@ -1263,7 +1272,7 @@ para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
 
 > 🔗 Milestone: sistema completo integrado, mock y real, corriendo end-to-end.
 
-## Semana 21 — Pruebas de estrés (TIME_WARP + Locust) `[INT]` — ejecutado en PC de desarrollo (19-20/8/2026), falta el número real en RPi5
+## Semana 21 — Pruebas de estrés (TIME_WARP + Locust) `[INT]` ✅ COMPLETA (número real de RPi5 confirmado 20/8/2026)
 
 - [x] Ejecutar pruebas de estrés sobre el pipeline de red con Locust —
       corrido de verdad por primera vez (`docker compose --profile stress up`,
@@ -1297,15 +1306,29 @@ para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
       25-35s como el dashboard real): todas las respuestas devueltas en
       &lt;100ms incluso con la ingesta corriendo en simultáneo, muy por debajo
       del umbral de &lt;3s de RNF-02.
-- [ ] Medir throughput máximo sostenible **en el RPi5 real** sin pérdida de
-      datos de red — sigue pendiente de la próxima visita al LIT (ver
-      checklist al final del documento); el número de PC de desarrollo de
-      arriba no reemplaza este punto para RNF-01.
+- [x] Medir throughput máximo sostenible **en el RPi5 real** sin pérdida de
+      datos de red — **confirmado 20/8/2026, en el LIT**: Locust apuntando
+      directo al backend real (`http://<ip-rpi5>:8000`, misma red del LIT),
+      10 usuarios concurrentes/5 min simulando dashboards de Grafana: **106
+      requests, 0% de fallos, todas las respuestas ≤100ms** (p99=99ms) —
+      muy por debajo del umbral de 3s de RNF-02. Sin errores en los logs de
+      `starlink-backend` durante la corrida. **Este es el número que vale
+      para RNF-01**, no el de PC de desarrollo de arriba.
 
-## Semana 22 — Campaña inicial de medición `[INT]`
+## Semana 22 — Campaña inicial de medición `[INT]` — arrancó de hecho el 14/8, sin BME280 de Fede todavía
 
-- [ ] Dejar corriendo el sistema real varios días para recolectar datos de red
-- [ ] Primer análisis exploratorio: latencia/jitter/pérdida vs condiciones ambientales
+- [x] Dejar corriendo el sistema real varios días para recolectar datos de red —
+      **en curso desde el 14/8/2026** (no planificado como tal, fue consecuencia
+      de que la pila quedó desplegada en la RPi5): 8359 muestras reales en ~6
+      días al 20/8, `availability_pct` 100%, `data_completeness_pct` 82.9%,
+      latencia promedio 28.9ms (p95 42.6ms). Sigue corriendo.
+- [ ] Primer análisis exploratorio: latencia/jitter/pérdida vs condiciones
+      ambientales — **bloqueado por Fede** (sin datos de `env_metrics` con
+      los que correlacionar todavía). Sí surgió un hallazgo solo del lado
+      red que hay que diagnosticar antes de usarlo en la memoria: 8358/8359
+      muestras con `is_obstructed=true` y throughput bajado muy por debajo
+      de lo típico de Starlink (~43 Kbps promedio) — ver "Checklist" al
+      final del documento.
 
 ## Semana 23 — Redacción de memoria y documentación `[IND]`
 
@@ -1401,45 +1424,67 @@ ejecutadas de verdad, no solo escritas:
 
 ## Checklist — próxima visita al LIT (antena real / RPi5)
 
-Consolidado acá para no tener que rastrearlo por todo el documento. Dos listas separadas
-a propósito: la primera son cosas que **necesitan estar físicamente en el LIT**, la
-segunda son cosas que se decidió posponer esta sesión pero que no dependen del LIT.
+**Actualizado 20/8/2026, visita presencial real al LIT con acceso a la RPi5 y la antena.**
+Sorpresa al llegar: **la pila completa ya estaba corriendo en la RPi5 desde el 14/8**
+(alguien la dejó desplegada, no fue esta sesión) — backend, consumer, ambas DBs, Grafana,
+broker y `acquisition` contra la antena real, los 7 contenedores `Up 5 days`, `Restarts: 0`.
+Eso adelantó varios ítems que se esperaban "sin hacer". Estado real ítem por ítem:
 
-**Requieren presencia física (antena real / RPi5):**
+1. ~~Instalar Docker Engine en la RPi5~~ — **ya estaba instalado** (Docker 29.7.2), no fue
+   necesario hacer nada.
+2. ~~Correr el extractor como servicio continuo contra la antena real~~ — **confirmado
+   corriendo 5+ días sin interrupción** contra `192.168.100.1:9200` antes de esta visita.
+   Comparación mock vs. real hecha hoy: las 16 claves de `metrics` son **idénticas** entre
+   un payload generado por `StarlinkMockAgent` y uno real traído del backend — prueba
+   concreta de equivalencia de ADR-01. Único evento en 5 días: un `WARNING` de "no se pudo
+   consultar la antena, se salta este ciclo" (`no route to host`, transitorio) — el
+   contenedor no se cayó, exactamente el comportamiento que pide `CLAUDE.md`.
+3. ~~Traer las fixtures reales~~ — **hecho hoy**, `tests/fixtures/grpc/` (PR #21). Device id
+   real redactado antes de commitear (repo público, ver README del directorio).
+4. Apuntar la RPi5 al broker de la VM de cátedra — **sigue bloqueado**: re-confirmado hoy
+   que `35.224.141.221:5883` no es alcanzable desde la RPi5 (`vm-broker-no-alcanzable`),
+   mismo problema de red que en la sesión anterior. Necesita que alguien de
+   infraestructura/redes del LIT abra la ruta, no es algo que se resuelva desde acá.
+5. Confirmar con Fede la convivencia de ambos módulos en la RPi5 — **sigue sin resolver**:
+   no hay ningún contenedor ni carpeta de su módulo en la RPi5 todavía.
+6. Arrancar `monitor_ca02.py` real por 72h — **lanzado hoy** (`nohup`, detached, sobrevive
+   al cierre de la sesión SSH), `ca02_monitor_20ago_72h.jsonl` en la RPi5, terminaría
+   ~23/8 14:10 (-03). El intento anterior (`ca02_smoke_test.jsonl`, 14/8) fue sólo un smoke
+   test de 3 minutos, no la corrida real — queda preservado en el scratchpad de esa sesión
+   como evidencia del smoke test.
+7. Correr Locust contra el backend real en la RPi5 — **hecho hoy**, apuntando directo a
+   `http://<ip-rpi5>:8000` desde la laptop en la misma red del LIT: **106 requests, 0%
+   fallos, todas las respuestas ≤100ms** (percentil 99 = 99ms). Este sí es el número que
+   vale para RNF-01/RNF-02, no el preliminar de PC de desarrollo de la Semana 21.
+8. Campaña inicial de medición (semana 22) — arrancó de hecho el 14/8 sin que nadie la
+   planificara como tal: **8359 muestras reales acumuladas en ~6 días**
+   (`data_completeness_pct` 82.9%, `availability_pct` 100%, latencia promedio 28.9ms,
+   p95 42.6ms). Primer hallazgo exploratorio, sin investigar a fondo todavía: **8358 de
+   8359 muestras tienen `is_obstructed=true`**, y el throughput bajado promedia apenas
+   ~43 Kbps (máximo 5.15 Mbps en 6 días) — muy por debajo de lo típico de Starlink. Puede
+   ser una obstrucción física real en la ubicación de la antena del LIT (consistente con
+   el objetivo del PI de correlacionar obstrucción/clima con degradación), o algo a
+   revisar en el mapeo de unidades del extractor — **sin diagnosticar todavía, anotado
+   para la próxima sesión de análisis, no es parte del alcance de esta verificación**.
+9. Llevar al director/co-director los puntos de "Pendiente — revisar con director" — **sin
+   cambios, sigue pendiente de esa reunión.**
 
-1. Instalar Docker Engine en la RPi5 — bloqueante para el resto de esta lista (la sesión
-   de la VM de arriba confirma que la RAM de la RPi5 alcanza para el broker en la VM, no
-   para la pila completa local — ver esa sección).
-2. Correr `src/acquisition/__main__.py` como servicio continuo contra la antena real;
-   comparar un payload real vs. uno del mock lado a lado (prueba concreta de ADR-01,
-   semana 10, sigue con la lógica de mapeo validada offline pero nunca como proceso
-   continuo real).
-3. Traer las fixtures reales capturadas por SSH (`get_status_full.json`,
-   `get_history.json`, `get_diagnostics.json`, sesiones 04/08 y 12/08) y comitearlas en
-   `tests/fixtures/grpc/` — hoy sólo existen en la RPi5 y los tests usan dicts sintéticos.
-4. Apuntar la RPi5 al broker de la VM de cátedra (`MQTT_HOST=35.224.141.221`,
-   `MQTT_PORT=5883`) — bloqueado esta sesión por falta de ruta de red hasta la RPi5, ver
-   sección de arriba.
-5. Confirmar con Fede la convivencia de ambos módulos en la misma RPi5 (pendiente desde
-   semana 10).
-6. Arrancar `monitor_ca02.py` real por 72h continuas (CA-01/CA-02) — herramienta lista,
-   sin smoke-test contra una pila real todavía (ver ítem 8 abajo).
-7. Correr Locust contra el backend real en la RPi5 — el número que vale para RNF-01 (el
-   de PC de desarrollo de Semana 21 arriba es sólo una cota preliminar).
-8. Arrancar la campaña inicial de medición (semana 22) — necesita días de datos reales.
-9. Llevar al director/co-director los 4 puntos ya listados en "Pendiente — revisar con
-   director/co-director" (arriba del todo) para pasar los ADR de "Propuesto" a
-   "Aceptado" — incluye ahora también confirmar si `/metrics/starlink` y `/summary`
-   deberían manejar "sin datos" de la misma forma (hallazgo del stress test, Semana 21).
+Además, no estaba en la lista original pero se hizo hoy: **la RPi5 se actualizó a la
+última `main`** (estaba 7 commits atrás, en particular sin el fix de tópico
+`starlink/status/<node_id>` de ADR-03/04, PR #14) — `git pull --ff-only` + rebuild +
+restart de `acquisition`/`backend`/`consumer`. Confirmado el tópico nuevo publicando
+(`starlink/status/lit-cordoba-01`, retained) y los tres servicios sanos después del
+restart. Esto cortó la racha de 5 días de uptime continuo del contenedor `acquisition`
+a propósito — la evidencia de CA-01/CA-02 de esos 5 días ya quedó documentada arriba,
+así que no se perdió nada, y vale más tener el código al día.
 
-**Pospuesto esta sesión (no depende del LIT, sólo no se hizo ahora):**
+**Pendiente real después de esta visita** (ya no depende del LIT, son análisis/decisiones):
 
-10. Smoke test de `scripts/monitor_ca02.py` contra una pila local real (~10-15 min) en
-    vez del servidor HTTP falso usado hasta ahora — valida la herramienta antes de
-    confiarle las 72h del LIT.
-11. Capturas de los paneles de Grafana nuevos (handovers, alineación, `snr_low`) para la
-    memoria — necesita sesión de navegador contra `localhost:3000` con la pila arriba.
-    Guardar en `~/Documentos/Facultad/Pi/`, no en el repo.
-12. Housekeeping: ramas locales/remotas ya mergeadas o abandonadas
-    (`docs/source-producer-semantica` ya mergeada vía PR #15, por ejemplo) — revisar con
-    `git branch -a --no-merged main` antes de borrar cualquiera.
+- Diagnosticar el hallazgo del ítem 8 (obstrucción casi constante / throughput bajo) antes
+  de usarlo como dato de la memoria.
+- Revisar `ca02_monitor_20ago_72h.jsonl` en la RPi5 cuando termine (~23/8) y volcar el
+  resumen PASS/FAIL acá.
+- Ítems 4, 5 y 9 de arriba, que no se pueden cerrar sin Fede/director/redes del LIT.
+- Housekeeping menor sin hacer todavía: capturas de Grafana para la memoria (necesita
+  sesión de navegador) y limpieza de ramas ya mergeadas
+  (`git branch -a --no-merged main`).
