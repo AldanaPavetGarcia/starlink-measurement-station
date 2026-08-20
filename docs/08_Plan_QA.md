@@ -314,16 +314,16 @@ La siguiente checklist debe estar completada antes de la presentación final del
 
 | **#** | **Ítem de verificación** | **Evidencia requerida** | **Estado** |
 | --- | --- | --- | --- |
-| **1** | Cobertura de pruebas unitarias ≥ 80% en módulos críticos | Reporte HTML de pytest-cov en repositorio | Pendiente |
-| **2** | Suite IT-01 a IT-04 con 0 fallos en entorno de test local | Log de pytest con PASSED en todos los TCs | Pendiente |
-| **3** | Suite E2E completa con pila Docker de producción | Capturas de pantalla de Grafana con datos reales | Pendiente |
-| **4** | Prueba de estrés ST-01 a ST-03 documentadas en RPi5 | Reporte Locust HTML + docker stats capturado | Pendiente |
-| **5** | Prueba de persistencia CA-03: reinicio sin pérdida de datos | Comparación de COUNT(*) antes y después del reinicio | Pendiente |
-| **6** | Acceso SSH remoto verificado desde fuera de la red LIT | Screenshot de sesión SSH + fecha/hora | Pendiente |
-| **7** | Despliegue desde cero en máquina limpia en < 30 min | Video o log con timestamps del proceso completo | Pendiente |
-| **8** | Morfología de paquetes MQTT == esquema DER (coherencia total) | Comparación manual campo a campo documentada (CA-08) | Pendiente |
-| **9** | Dashboard de correlación Red-Clima operativo con datos reales | Screenshot del panel con ambas series en el mismo eje | Pendiente |
-| **10** | Pipeline CI corriendo en GitHub Actions sin fallos | Badge verde en el README del repositorio | Pendiente |
+| **1** | Cobertura de pruebas unitarias ≥ 80% en módulos críticos | Reporte HTML de pytest-cov en repositorio | **Hecho en la práctica** — piso subido a 90% (PR #11), ~94.71% real confirmado (sesión 13/8, ver `docs/PROGRESS.md`). Falta solo adjuntar el reporte HTML como artefacto formal, hoy solo vive en la corrida de CI. |
+| **2** | Suite IT-01 a IT-04 con 0 fallos en entorno de test local | Log de pytest con PASSED en todos los TCs | **Hecho** — PASS ✓ en la tabla de §7 de este documento; automatizada en `tests/integration/`, corre en CI. |
+| **3** | Suite E2E completa con pila Docker de producción | Capturas de pantalla de Grafana con datos reales | **Parcial** — E2E con mocks en PASS (§7); con hardware real, la pila corrió en la RPi5 desde el 14/8 con datos reales confirmados en `network_metrics` (ver `docs/PROGRESS.md`, semana 10), pero no se tomaron capturas de pantalla de Grafana como evidencia formal todavía. |
+| **4** | Prueba de estrés ST-01 a ST-03 documentadas en RPi5 | Reporte Locust HTML + docker stats capturado | Pendiente — script escrito (`tests/stress/locustfile.py`), nunca ejecutado contra el RPi5 real (ver "Semana 21" en `docs/PROGRESS.md`). |
+| **5** | Prueba de persistencia CA-03: reinicio sin pérdida de datos | Comparación de COUNT(*) antes y después del reinicio | Pendiente — no se registró una comparación de `COUNT(*)` antes/después de un `docker compose restart` sobre la pila real como evidencia formal. |
+| **6** | Acceso SSH remoto verificado desde fuera de la red LIT | Screenshot de sesión SSH + fecha/hora | **Intentado, bloqueado** — probado hoy (19-20/8) desde fuera de la red LIT: `leonode-rpi` no responde ("No route to host", sin Tailscale local disponible en esta sesión). Sí se logró SSH remoto exitoso a otra máquina del proyecto (la VM de la cátedra, `35.224.141.221`) — no es la misma evidencia que pide este ítem (tiene que ser a la RPi5). |
+| **7** | Despliegue desde cero en máquina limpia en < 30 min | Video o log con timestamps del proceso completo | **Parcial** — se hizo el despliegue real desde cero en la RPi5 (14/8, Docker recién instalado), pero no se cronometró formalmente como evidencia de "< 30 min". |
+| **8** | Morfología de paquetes MQTT == esquema DER (coherencia total) | Comparación manual campo a campo documentada (CA-08) | **Hecho** — automatizado, no manual: `tests/test_ca08_schema_coherence.py` (3 tests), compara `StarlinkMetrics` contra `network_metrics` en ambas direcciones y corre un payload real a través del consumer. |
+| **9** | Dashboard de correlación Red-Clima operativo con datos reales | Screenshot del panel con ambas series en el mismo eje | Pendiente — depende del módulo de Fede (`meteo_db` no existe todavía, ver `starlink-station-stack/docs/INTEGRATION_CHECKLIST.md`); sin datos ambientales reales no hay correlación que mostrar. |
+| **10** | Pipeline CI corriendo en GitHub Actions sin fallos | Badge verde en el README del repositorio | **Hecho** — CI corre en cada PR contra GitHub real (confirmado repetidas veces esta sesión, PRs #13 a #16, todos en verde antes de mergear). Falta agregar el badge visual al `README.md` (el CI en sí funciona, el badge es solo la vidriera). |
 
 *— Fin del documento —*
 
