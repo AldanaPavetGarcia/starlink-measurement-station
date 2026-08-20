@@ -1129,7 +1129,7 @@ para quien tenga la pila abierta en Grafana, http://localhost:3000).
 para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
 `docs/07_API_REST.md`) — pendiente de rama + PR según el ruleset de `main`.
 
-## Semanas 11–12 — Suite de testing + CI `[IND]` ✅ COMPLETA (código; CI sin correr en GitHub real todavía)
+## Semanas 11–12 — Suite de testing + CI `[IND]` ✅ COMPLETA (código y CI corriendo en GitHub real, confirmado 19-20/8)
 
 - [x] Escribir/completar suites de integración (IT-01): mock → broker →
       consumer → DB — `tests/integration/test_it01_pipeline.py`, automatiza
@@ -1166,10 +1166,15 @@ para este cambio (`src/backend/errors.py`, `tests/test_backend_api.py`,
       `starlink-backend`, `starlink-acquisition` -- con tag por SHA y
       `latest` solo en `main`; cierra el pendiente "publicar mock-starlink a
       GHCR" del modelo polyrepo, ver "Coordinación pendiente con Fede").
-      **Sin verificar corriendo en GitHub Actions real todavía** — no hay
-      push a un remoto en esta sesión; revisar el primer run real (y que
-      `GITHUB_TOKEN` tenga permiso `packages: write` en la config del repo)
-      antes de dar el job `publish` por cerrado.
+      **Actualizado 19-20/8, nota vieja corregida**: los dos workflows corren
+      contra GitHub real desde hace rato — `ci.yml` en verde en cada PR de esta
+      sesión (#13 a #19), `publish.yml` también corre (confirmado con
+      `gh run list --workflow=publish.yml`) pero **falló consistentemente hasta
+      hoy**: la pierna `amd64` armaba mal la URL de `grpcurl` (pedía
+      `..._linux_amd64.tar.gz`, el release real se llama `x86_64`) — corregido en
+      `Dockerfile.acquisition` (PR #16). Primera corrida en verde de `publish.yml`:
+      20/8/2026 01:19 UTC. `packages: write` del `GITHUB_TOKEN` no fue el
+      problema — el build fallaba antes de llegar al push a GHCR.
 
 ## Semanas 13–14 — Soporte a integración de APIs externas `[INT — Fede lidera]`
 
