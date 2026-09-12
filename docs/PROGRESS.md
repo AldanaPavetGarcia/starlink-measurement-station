@@ -1626,3 +1626,29 @@ no depende de terceros):
 
 No depende de la red del LIT, de Tailscale de terceros, ni de que nadie dé de alta ningún
 acceso — es autocontenido con lo que ya se controla (la RPi5 y la VM).
+
+### 2026-09-12 — Enmienda: `api_omixom` sumado al enum `source` (RF-11/RF-14)
+
+Se confirmó y probó en vivo un integrador real de clima externo contra la API del
+**OHMC** (`estaciones-beta.ohmc.com.ar`) — plataforma separada de `new.omixom.com`,
+cuenta separada, expone la misma red de estaciones (incluida "APRHi - Lab.
+Hidraulica-UNC", `station_id=89`, la más cercana al LIT) vía REST documentada con
+token. `GET /mediciones/ultimas?station_id=89` trae la última lectura de la estación
+en un solo call — login real + lectura real probados (~6°C, 90% humedad, sin lluvia).
+
+Implementado como propuesta en `tesis-sensor-node` (dominio de Fede, PR abierto ahí,
+no en este repo) — pero el nuevo valor de `source` (`api_omixom`) sí toca los
+documentos autoritativos de este repo:
+
+- `docs/06_DER.md`: `api_omixom` agregado al CHECK constraint de `env_metrics.source`
+  (columna y ambos snippets SQL).
+- `docs/07_API_REST.md` §9.2: `API_OMIXOM = "api_omixom"` agregado al enum `EnvSource`,
+  y a la tabla de query params de `/metrics/env`.
+- `docs/05_ADR.md`, ADR-04: aclarada la fila de `meteo/external/<node_id>` — es un
+  tópico compartido por cualquier integrador de API externa (Open-Meteo, SMN,
+  Omixom/OHMC), distinguidos por `source` en el payload, mismo criterio que ya usa
+  `starlink/metrics/<node_id>` entre mock y real. No hace falta un tópico por fuente.
+
+Sigue pendiente (no bloqueante, anotado en `tesis-sensor-node/docs/DISEÑO_INTEGRADOR_CLIMA.md`):
+decidir si `api_smn` (código ya escrito, sin probar contra respuesta real) se despliega
+en paralelo o queda de respaldo ahora que Omixom/OHMC ya cumple RF-11 solo.

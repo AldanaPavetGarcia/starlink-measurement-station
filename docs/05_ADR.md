@@ -369,7 +369,7 @@ La taxonomía de tópicos establece el enrutamiento semántico de todos los mens
 | --- | --- | --- | --- |
 | starlink/metrics/<node_id> | Script gRPC Starlink (real o mock) | Consumer Router | starlink_health_db → hypertable network_metrics |
 | meteo/sensor/<node_id> | ESP32 + BME280 (real o mock) | Consumer Router | meteo_db → hypertable env_metrics |
-| meteo/external/<node_id> | Integrador API (Open-Meteo) | Consumer Router | meteo_db → hypertable env_metrics |
+| meteo/external/<node_id> | Integrador de API externa (Open-Meteo, SMN, Omixom/OHMC — cualquiera, mismo tópico, distinguidos por `source` en el payload, mismo criterio que `starlink/metrics/<node_id>` entre mock y real) | Consumer Router | meteo_db → hypertable env_metrics |
 | starlink/status/<node_id> | Productores Starlink, real o mock (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
 | meteo/status/<node_id> | Productores ambientales, real o mock (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
 
