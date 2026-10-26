@@ -26,6 +26,15 @@ STATION_CONFIG_DB_NAME = os.environ.get("STATION_CONFIG_DB_NAME", "station_confi
 STATION_CONFIG_DB_USER = os.environ.get("STATION_CONFIG_DB_USER", "station_config_app")
 STATION_CONFIG_DB_PASSWORD = os.environ.get("STATION_CONFIG_DB_PASSWORD", "")
 
+# meteo_data es la DB del módulo de Fede (ADR-21, vive en tesis-sensor-node).
+# METEO_DB_HOST vacío = no configurada: la pila de este repo levantada sola no
+# la tiene, y /health la reporta como "not_configured" en vez de "down".
+METEO_DB_HOST = os.environ.get("METEO_DB_HOST", "")
+METEO_DB_PORT = os.environ.get("METEO_DB_PORT", "5432")
+METEO_DB_NAME = os.environ.get("METEO_DB_NAME", "meteo_data")
+METEO_DB_USER = os.environ.get("METEO_DB_USER", "meteo_app")
+METEO_DB_PASSWORD = os.environ.get("METEO_DB_PASSWORD", "")
+
 # Semana 9 (backend): raw < 6h, hourly < 30d, daily >= 30d -- ver
 # docs/07_API_REST.md "Lógica de selección automática de Continuous Aggregate".
 AUTO_RESOLUTION_RAW_MAX_HOURS = 6

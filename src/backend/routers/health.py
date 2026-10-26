@@ -15,14 +15,14 @@ router = APIRouter(tags=["system"])
 
 @router.get("/health", summary="Estado del sistema")
 def health_check() -> dict:
+    # meteo_data es la DB del módulo de Fede (ADR-21). Sin METEO_DB_HOST (esta
+    # pila levantada sola) se reporta "not_configured" en vez de fallar o
+    # inventar un "up" falso.
+    meteo = db.meteo_engine()
     components = {
         "db_starlink_health": db.ping(db.starlink_engine()),
         "mqtt_broker": db.ping_mqtt_broker(config.MQTT_HOST, config.MQTT_PORT),
-        # meteo_data es dominio de Fede (CLAUDE.md §1.1) -- todavía no hay
-        # meteo_db real (src/consumer/db.py:MeteoDB es un stub), así que se
-        # reporta "not_configured" en vez de fallar o inventar un "up" falso.
-        # Ver docs/PROGRESS.md "Coordinación pendiente con Fede".
-        "db_meteo_data": {"status": "not_configured"},
+        "db_meteo_data": db.ping(meteo) if meteo is not None else {"status": "not_configured"},
     }
 
     down = [c for c in components.values() if c.get("status") == "down"]
@@ -32,6 +32,8 @@ def health_check() -> dict:
         components["db_starlink_health"]["last_write"] = db.last_write(
             db.starlink_engine(), "network_metrics"
         )
+    if meteo is not None and components["db_meteo_data"]["status"] == "up":
+        components["db_meteo_data"]["last_write"] = db.last_write(meteo, "env_metrics")
 
     return {
         "status": overall,

@@ -192,28 +192,34 @@ Ejemplo de paquete completo:
 
 ### 5.2 Paquete de Datos Ambientales (Sensor Local)
 
+> **Enmienda ADR-21 (26/10/2026):** el origen del dato se describe con `source` (`real` \| `mock`) y `producer` (productor concreto). Las variables ambientales viajan anidadas bajo `metrics` (mismo patrón que §5.1), y el sensor se identifica con `metrics.sensor_uid`. El contrato autoritativo de este paquete es el de `tesis-sensor-node` (`services/meteo_consumer/src/models.py`, `EnvPayloadIn`).
+
 Publicado en el tópico MQTT: meteo/sensor/<node_id>
 
 | **Campo** | **Tipo** | **Descripción** | **Ejemplo** |
 | --- | --- | --- | --- |
 | timestamp | string (ISO 8601) | Instante UTC de la medición | "2026-06-01T14:30:00Z" |
 | node_id | string | Identificador del nodo sensor | "lit-cordoba-01" |
-| source | string | Fuente del dato: 'local_sensor' o 'api_ext' | "local_sensor" |
+| source | string | Naturaleza del dato: 'real' o 'mock' (ADR-21) | "real" |
+| producer | string | Productor concreto (ADR-21) | "bme280" |
 | temperature_c | float | Temperatura en grados Celsius | 18.5 |
 | humidity_pct | float | Humedad relativa (0–100) | 62.3 |
 | pressure_hpa | float | Presión atmosférica en hPa | 1013.2 |
-| sensor_id | string / null | Identificador del sensor físico | "BME280-01" |
+| sensor_uid | string / null | Identificador del sensor físico, dentro de `metrics` (ADR-21; antes `sensor_id`) | "bme280-01" |
 | schema_version | string | Versión del esquema de paquete | "1.0" |
 
 ### 5.3 Paquete de Datos Meteorológicos Externos (API)
 
 Publicado en el tópico MQTT: meteo/external/<node_id> — sincronizado por el servicio de integración de APIs.
 
+> **Enmienda ADR-21 (26/10/2026):** mismo envelope que §5.2. `source` indica `real` o `mock` y el proveedor va en `producer`.
+
 | **Campo** | **Tipo** | **Descripción** | **Ejemplo** |
 | --- | --- | --- | --- |
 | timestamp | string (ISO 8601) | Instante UTC del pronóstico o reporte | "2026-06-01T14:00:00Z" |
 | node_id | string | Nodo al que corresponde la ubicación | "lit-cordoba-01" |
-| source | string | Nombre del proveedor externo | "open-meteo" |
+| source | string | Naturaleza del dato: 'real' o 'mock' (ADR-21) | "real" |
+| producer | string | Proveedor externo (ADR-21) | "ohmc" |
 | temperature_c | float / null | Temperatura reportada por API | 17.0 |
 | humidity_pct | float / null | Humedad reportada por API | 65.0 |
 | pressure_hpa | float / null | Presión reportada por API | 1012.0 |
@@ -233,7 +239,7 @@ Se documentan a continuación los contratos de comunicación entre los component
 | **IF-03** | API Ext → Broker | Servicio integrador APIs climáticas | MQTT Broker | MQTT / JSON | Publicación de datos externos cada 15 min en tópico meteo/external/<node_id> |
 | **IF-04** | Broker → Consumer | MQTT Broker | Consumer / Subscriber Python | MQTT / JSON | Entrega de mensajes a los servicios suscriptores según tópico |
 | **IF-05** | Consumer → DB Red | Consumer de telemetría | DB Starlink Health | SQL / psycopg2 | INSERT de métricas de red en hypertable network_metrics |
-| **IF-06** | Consumer → DB Meteo | Consumer ambiental/externo | DB Meteo | SQL / psycopg2 | INSERT de variables ambientales en hypertable env_metrics |
+| **IF-06** | Consumer → DB Meteo | `meteo_consumer` (repo `tesis-sensor-node`, ADR-21) | DB Meteo | SQL / psycopg2 | INSERT de variables ambientales en hypertable env_metrics |
 | **IF-07** | Backend → DB Red | Backend API REST | DB Starlink Health | SQL / ORM | SELECT con filtros de rango temporal para exposición vía API |
 | **IF-08** | Backend → DB Meteo | Backend API REST | DB Meteo | SQL / ORM | SELECT con filtros de rango temporal para exposición vía API |
 | **IF-09** | Grafana → DB | Grafana (datasource) | Ambas DBs (TimescaleDB) | PostgreSQL protocol | Consultas nativas Grafana a las bases de datos para dashboards |
@@ -288,8 +294,8 @@ Los requerimientos se clasifican por subsistema y se les asigna prioridad: **Alt
 | --- | --- | --- |
 | **RF-19** | DEBE desplegarse una instancia independiente de PostgreSQL + TimescaleDB para métricas de red (DB: starlink_health) y otra para datos ambientales (DB: meteo_data). Cada servicio accede únicamente a su propia base de datos. | Alta |
 | **RF-20** | En DB starlink_health DEBE crearse una hypertable 'network_metrics' con los campos del esquema §5.1, particionada por tiempo con chunk_time_interval de 1 día. | Alta |
-| **RF-21** | En DB meteo_data DEBE crearse una hypertable 'env_metrics' con los campos de los esquemas §5.2 y §5.3, con columna 'source' para distinguir origen. | Alta |
-| **RF-22** | DEBEN definirse índices secundarios sobre node_id y source para acelerar consultas de filtrado frecuentes. | Media |
+| **RF-21** | En DB meteo_data DEBE crearse una hypertable 'env_metrics' con los campos de los esquemas §5.2 y §5.3, con columnas 'source' (real/mock) y 'producer' (productor concreto) para distinguir origen (ADR-21). | Alta |
+| **RF-22** | DEBEN definirse índices secundarios sobre node_id y source/producer (ADR-21) para acelerar consultas de filtrado frecuentes. | Media |
 | **RF-23** | DEBE configurarse una política de retención de datos de al menos 6 meses de historia sin compresión activa. | Media |
 | **RF-24** | DEBEN implementarse scripts de inicialización (init.sql) que creen esquemas, hypertables, índices y políticas, ejecutables idempotentemente. | Alta |
 

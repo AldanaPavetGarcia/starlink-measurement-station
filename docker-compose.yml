@@ -60,7 +60,7 @@ services:
     profiles: [real]
 
   # ADR-10/ADR-11: instancia TimescaleDB propia del dominio Starlink,
-  # independiente de meteo_db (que Fede todavía no levantó). Imagen pinneada
+  # independiente de meteo_data (la DB de Fede, en su repo -- ADR-21). Imagen pinneada
   # (nunca :latest en producción, ADR-12), verificada con `docker pull`. Sin
   # `ports`: ADR-14 dice que starlink_health_db NO se expone ni siquiera al
   # host -- solo el consumer y Grafana, ambos dentro de la red Docker, la
@@ -104,9 +104,9 @@ services:
       retries: 5
     profiles: [mocks, stress]
 
-  # Semana 6 (CLAUDE.md §1.1): consumer del dominio Starlink únicamente --
-  # Fede todavía no tiene su mock/tópico meteo, así que ese lado del router
-  # (ver src/consumer/router.py) queda enrutado pero sin persistencia real.
+  # Semana 6 (CLAUDE.md §1.1): consumer del dominio Starlink únicamente.
+  # Desde ADR-21 el dominio meteo tiene su propio consumer y su propia DB en
+  # tesis-sensor-node; la unión de las dos pilas la hace starlink-station-stack.
   consumer:
     build:
       context: .
@@ -173,6 +173,14 @@ services:
       # con `python -c "import secrets; print(secrets.token_hex(32))"`).
       BACKEND_API_KEY: ${BACKEND_API_KEY:-change_me_backend_api_key_dev_only}
       ENABLE_INGEST_ENDPOINT: ${ENABLE_INGEST_ENDPOINT:-false}
+      # ADR-21: meteo_data es la DB de Fede. Vacío = no configurada (esta pila
+      # sola). El compose de integración de starlink-station-stack la pone en
+      # la misma red Docker (ver networks al final) y setea METEO_DB_HOST.
+      METEO_DB_HOST: ${METEO_DB_HOST:-}
+      METEO_DB_PORT: ${METEO_DB_PORT:-5432}
+      METEO_DB_NAME: ${METEO_DB_NAME:-meteo_data}
+      METEO_DB_USER: ${METEO_DB_USER:-meteo_app}
+      METEO_DB_PASSWORD: ${METEO_DB_PASSWORD:-meteo_dev_password}
     ports:
       - "${BACKEND_PORT:-8000}:8000"
     profiles: [mocks, stress]
@@ -195,6 +203,14 @@ services:
       STARLINK_DB_NAME: ${STARLINK_DB_NAME:-starlink_health}
       STARLINK_DB_USER: ${STARLINK_DB_USER:-starlink_app}
       STARLINK_DB_PASSWORD: ${STARLINK_DB_PASSWORD:-starlink_dev_password}
+      # ADR-21: meteo_data es la DB de Fede. Vacío = no configurada (esta pila
+      # sola). El compose de integración de starlink-station-stack la pone en
+      # la misma red Docker (ver networks al final) y setea METEO_DB_HOST.
+      METEO_DB_HOST: ${METEO_DB_HOST:-}
+      METEO_DB_PORT: ${METEO_DB_PORT:-5432}
+      METEO_DB_NAME: ${METEO_DB_NAME:-meteo_data}
+      METEO_DB_USER: ${METEO_DB_USER:-meteo_app}
+      METEO_DB_PASSWORD: ${METEO_DB_PASSWORD:-meteo_dev_password}
     volumes:
       - grafana_data:/var/lib/grafana
       - ./services/grafana/provisioning:/etc/grafana/provisioning:ro
@@ -202,6 +218,14 @@ services:
     ports:
       - "${GRAFANA_PORT:-3000}:3000"
     profiles: [mocks, stress]
+
+# Nombre fijo de la red (no "<carpeta>_default") para que el compose de
+# integración de starlink-station-stack pueda sumar los servicios de Fede
+# (meteo_data, meteo_consumer) a esta misma red sin depender del nombre de la
+# carpeta donde se clonó este repo (ADR-21).
+networks:
+  default:
+    name: ${STARLINK_NETWORK_NAME:-starlink-station-net}
 
 volumes:
   mosquitto_data:

@@ -1,0 +1,345 @@
+{
+  "title": "Correlación Red-Clima",
+  "uid": "correlacion-red-clima",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "utc",
+  "refresh": "1m",
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "tags": [
+    "starlink",
+    "meteo",
+    "correlacion"
+  ],
+  "description": "RF-33 / CA-04. Cruza starlink_health_db (este repo) con meteo_data (DB de Fede, ADR-21) por tiempo, en el navegador (Data Blending, ADR-10). Cada serie ambiental es un productor: producer (source).",
+  "templating": {
+    "list": [
+      {
+        "name": "node_id",
+        "type": "query",
+        "label": "Nodo",
+        "datasource": {
+          "type": "postgres",
+          "uid": "starlink_health_db"
+        },
+        "query": "SELECT DISTINCT node_id FROM network_metrics ORDER BY node_id",
+        "refresh": 1,
+        "multi": true,
+        "includeAll": true,
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Latencia (ms) vs. temperatura (°C)",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "celsius"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "starlink_health_db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time AS \"time\", latency_ms AS \"latencia\" FROM network_metrics WHERE $__timeFilter(time) AND node_id IN ($node_id) ORDER BY time"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "meteo_data"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time AS \"time\", producer || ' (' || source || ')' AS metric, temperature_c AS value FROM env_metrics WHERE $__timeFilter(time) AND node_id IN ($node_id) AND temperature_c IS NOT NULL ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Packet loss (%) vs. humedad (%)",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "humidity"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "starlink_health_db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time AS \"time\", packet_loss_pct AS \"packet loss\" FROM network_metrics WHERE $__timeFilter(time) AND node_id IN ($node_id) ORDER BY time"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "meteo_data"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time AS \"time\", producer || ' (' || source || ')' AS metric, humidity_pct AS value FROM env_metrics WHERE $__timeFilter(time) AND node_id IN ($node_id) AND humidity_pct IS NOT NULL ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "Throughput de bajada (Mbps) vs. presión (hPa)",
+      "gridPos": {
+        "h": 9,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "datasource": {
+        "type": "datasource",
+        "uid": "-- Mixed --"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short"
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byFrameRefID",
+              "options": "B"
+            },
+            "properties": [
+              {
+                "id": "custom.axisPlacement",
+                "value": "right"
+              },
+              {
+                "id": "unit",
+                "value": "pressurehpa"
+              }
+            ]
+          }
+        ]
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "starlink_health_db"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time AS \"time\", throughput_down_bps / 1e6 AS \"bajada\" FROM network_metrics WHERE $__timeFilter(time) AND node_id IN ($node_id) ORDER BY time"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "postgres",
+            "uid": "meteo_data"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time AS \"time\", producer || ' (' || source || ')' AS metric, pressure_hpa AS value FROM env_metrics WHERE $__timeFilter(time) AND node_id IN ($node_id) AND pressure_hpa IS NOT NULL ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Temperatura (°C)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 27
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "meteo_data"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "celsius"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "meteo_data"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time AS \"time\", producer || ' (' || source || ')' AS metric, temperature_c AS value FROM env_metrics WHERE $__timeFilter(time) AND node_id IN ($node_id) AND temperature_c IS NOT NULL ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Humedad (%)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 27
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "meteo_data"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "humidity"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "meteo_data"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time AS \"time\", producer || ' (' || source || ')' AS metric, humidity_pct AS value FROM env_metrics WHERE $__timeFilter(time) AND node_id IN ($node_id) AND humidity_pct IS NOT NULL ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Presión (hPa)",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 27
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "meteo_data"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "pressurehpa"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "meteo_data"
+          },
+          "format": "time_series",
+          "rawQuery": true,
+          "rawSql": "SELECT time AS \"time\", producer || ' (' || source || ')' AS metric, pressure_hpa AS value FROM env_metrics WHERE $__timeFilter(time) AND node_id IN ($node_id) AND pressure_hpa IS NOT NULL ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "table",
+      "title": "Último dato ambiental por productor (24 h)",
+      "gridPos": {
+        "h": 7,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "datasource": {
+        "type": "postgres",
+        "uid": "meteo_data"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "postgres",
+            "uid": "meteo_data"
+          },
+          "format": "table",
+          "rawQuery": true,
+          "rawSql": "SELECT source, producer, MAX(time) AS \"Último dato\", COUNT(*) AS \"Muestras 24 h\" FROM env_metrics WHERE node_id IN ($node_id) AND time > now() - INTERVAL '24 hours' GROUP BY source, producer ORDER BY source, producer"
+        }
+      ]
+    }
+  ]
+}

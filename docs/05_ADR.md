@@ -57,6 +57,7 @@ Este documento es de carácter vivo: cada ADR puede ser superado por uno posteri
 | **ADR-18** | Exposición de `alignmentStats` (Orientación Física de la Antena) | Esquema / HW real | Campos planos de tilt/azimuth/elevación en `metrics`, sin sub-objeto anidado | **Propuesto** |
 | **ADR-19** | Corrección de la fuente de `is_obstructed` | Esquema / HW real | `dishGetDiagnostics.alerts.obstructed` (llamada gRPC nueva) sobre `obstructionStats.fractionObstructed > 0`, que era acumulado y no el estado actual (hallazgo 20/08) | **Propuesto** |
 | **ADR-20** | Bridge MQTT saliente hacia el broker compartido de la VM de cátedra | Persistencia / IF | Bridge `out` de Mosquitto sobre `starlink/#`, credenciales en `conf.d/` gitignored, salida por el enlace Starlink (`eth0`) | **Propuesto** |
+| **ADR-21** | Propiedad del dominio meteo y contrato `source`/`producer` | Persistencia / Integración | Cada módulo es dueño de su DB y su consumer (meteo en `tesis-sensor-node`); `source` ∈ {`real`, `mock`}, `producer` = productor concreto | **Propuesto** |
 
 # FASE 1 — Diseño y Definición de Contratos
 
@@ -367,9 +368,9 @@ La taxonomía de tópicos establece el enrutamiento semántico de todos los mens
 
 | **Tópico MQTT** | **Productor** | **Consumidor** | **Base de Datos Destino** |
 | --- | --- | --- | --- |
-| starlink/metrics/<node_id> | Script gRPC Starlink (real o mock) | Consumer Router | starlink_health_db → hypertable network_metrics |
-| meteo/sensor/<node_id> | ESP32 + BME280 (real o mock) | Consumer Router | meteo_db → hypertable env_metrics |
-| meteo/external/<node_id> | Integrador de API externa (Open-Meteo, SMN, Omixom/OHMC — cualquiera, mismo tópico, distinguidos por `source` en el payload, mismo criterio que `starlink/metrics/<node_id>` entre mock y real) | Consumer Router | meteo_db → hypertable env_metrics |
+| starlink/metrics/<node_id> | Script gRPC Starlink (real o mock) | `consumer` (este repo) | starlink_health_db → hypertable network_metrics |
+| meteo/sensor/<node_id> | ESP32 + BME280 (real o mock) | `meteo_consumer` (`tesis-sensor-node`, ADR-21) | meteo_data → hypertable env_metrics |
+| meteo/external/<node_id> | Integrador de API externa (Open-Meteo, SMN, Omixom/OHMC — cualquiera, mismo tópico, distinguidos por `producer` en el payload; `source` indica real o mock, ADR-21) | `meteo_consumer` (`tesis-sensor-node`, ADR-21) | meteo_data → hypertable env_metrics |
 | starlink/status/<node_id> | Productores Starlink, real o mock (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
 | meteo/status/<node_id> | Productores ambientales, real o mock (heartbeats, LWT) | Grafana + Alertmanager | No persiste — alerting en tiempo real |
 
@@ -402,7 +403,7 @@ La taxonomía de tópicos establece el enrutamiento semántico de todos los mens
 | --- | --- | --- |
 | **Desacoplamiento** | ✅ PRO | Los productores no conocen la existencia de la DB. Solo saben que existe un broker. Agregar nuevas fuentes de datos no requiere tocar el consumer. |
 | **Resiliencia QoS 1** | ✅ PRO | Si el consumer cae, el broker retiene los mensajes (sesión persistente). Al reconectar, entrega los mensajes sin pérdida. |
-| **Enrutamiento por tópico** | ✅ PRO | El consumer implementa el patrón Database per Service (ADR-10) analizando el tópico de cada mensaje para decidir a qué DB lo inserta. |
+| **Enrutamiento por tópico** | ✅ PRO | Cada consumer se suscribe solo a los tópicos de su dominio y escribe en su propia DB (Database per Service, ADR-10). Desde ADR-21 hay un consumer por dominio en vez de un router único. |
 | **Complejidad operativa** | ⚠️ CONTRA | Más componentes = más superficie de falla. Mitigación: healthcheck de Docker y restart: unless-stopped en todos los servicios. |
 | **Latencia adicional (MQTT broker)** | ⚠️ CONTRA | El broker añade ~1–5 ms de latencia en la ruta del dato. Completamente despreciable para datos de telemetría a 1 msg/min. |
 
@@ -722,9 +723,11 @@ starlink_health_db (TimescaleDB): métricas de red (latencia, jitter, throughput
 
 ### Consecuencias e Implicaciones
 
+- **Enmienda ADR-21 (26/10/2026):** el router único se reemplaza por un consumer por dominio. `consumer` (este repo) solo procesa `starlink/metrics/+`, y `meteo_consumer` (`tesis-sensor-node`) procesa `meteo/*` hacia su propia base `meteo_data`. El texto que sigue describe el diseño anterior y se conserva por trazabilidad.
+
 - El consumer MQTT (el router de base de datos) analiza el tópico de cada mensaje entrante para decidir a qué base de datos insertar. La lógica es simple: tópicos que empiezan con `starlink/` van a starlink_health_db; tópicos que empiezan con `meteo/` van a meteo_db (implementado en `src/consumer/router.py:ConsumerRouter`, semana 6 — ver `docs/PROGRESS.md`). Corregido de la redacción anterior (`/net_health/`, `/meteo/`), que citaba una nomenclatura de tópicos previa a la corrección de ADR-04 y ya no existía en ningún documento. `station_config_db` no participa del routing MQTT — se consulta directamente (lookup de catálogo), no recibe mensajes.
 
-- Grafana se configura con datasources independientes: starlink_health_db y (cuando exista) meteo_db. Los dashboards de correlación usan el operador de transformación Outer Join by Time para alinear ambas series. `station_config_db` no necesita datasource propio en Grafana por ahora (no hay paneles que la consulten todavía).
+- Grafana se configura con datasources independientes: starlink_health_db y meteo_data (la base de Fede, alcanzada por `METEO_DB_HOST`, ADR-21). Los dashboards de correlación usan el operador de transformación Outer Join by Time para alinear ambas series. `station_config_db` no necesita datasource propio en Grafana por ahora (no hay paneles que la consulten todavía).
 
 - Los scripts de inicialización SQL (init.sql) son separados por base de datos y se ejecutan como parte de la configuración del contenedor Docker (`services/db/init_starlink_health.sql`, `services/db/init_station_config.sql`).
 
@@ -807,7 +810,7 @@ Adicionalmente, la directriz explícita del director exige que la migración de 
 
 **✅ Decisión: Alternativa B — Docker Engine + Docker Compose V2. Todo contenerizado.**
 
-Cada microservicio tiene su propio Dockerfile. Un único docker-compose.yml orquesta todos los servicios: broker MQTT, dos instancias TimescaleDB (starlink_health_db, meteo_db) + una instancia PostgreSQL plana (station_config_db, ADR-10), consumer router, backend FastAPI, Grafana, mocks. Las imágenes base son slim/alpine para minimizar el tamaño. Las versiones de dependencias están pinneadas (no se usa :latest en producción).
+Cada microservicio tiene su propio Dockerfile. Un único docker-compose.yml orquesta todos los servicios (**enmienda ADR-21:** la pila meteo vive en el compose de `tesis-sensor-node` y la unión de los dos en el compose de integración de `starlink-station-stack`): broker MQTT, dos instancias TimescaleDB (starlink_health_db, meteo_db) + una instancia PostgreSQL plana (station_config_db, ADR-10), consumer router, backend FastAPI, Grafana, mocks. Las imágenes base son slim/alpine para minimizar el tamaño. Las versiones de dependencias están pinneadas (no se usa :latest en producción).
 
 ### Pros y Contras
 
@@ -850,7 +853,7 @@ Una plataforma de visualización convierte los millones de filas de TimescaleDB 
 
 **✅ Decisión: Alternativa B — Grafana OSS LTS**
 
-Grafana se despliega como contenedor Docker con aprovisionamiento automático: los datasources (starlink_health_db y meteo_db) y los dashboards iniciales se cargan desde archivos JSON en el directorio de provisioning al arrancar el contenedor. Los dashboards se versionan en Git junto al código del proyecto.
+Grafana se despliega como contenedor Docker con aprovisionamiento automático: los datasources (starlink_health_db y meteo_data, esta última por variables de entorno según ADR-21) y los dashboards iniciales se cargan desde archivos JSON en el directorio de provisioning al arrancar el contenedor. Los dashboards se versionan en Git junto al código del proyecto.
 
 ### Taxonomía de Dashboards
 
@@ -1360,22 +1363,112 @@ sigue por `wlan0` sin cambios.
 | **Ruta de red no estándar, dependiente de que la RPi5 mantenga ambos uplinks** | ⚠️ CONTRA | Si el enlace Starlink cae, el bridge también cae (aunque el pipeline local sigue funcionando sin él) — es una dependencia nueva, documentada, no una falla silenciosa. |
 | **Credenciales fuera del repo (gitignored)** | ✅ PRO | Mismo patrón ya validado en `starlink-station-stack/infra/mosquitto-vm/` (passwordfile) — consistente, no una solución ad-hoc nueva. |
 
+## ADR-21 — Propiedad del Dominio Meteo y Contrato `source`/`producer` de `env_metrics`
+
+| **Atributo** | **Valor** |
+| --- | --- |
+| **ID** | ADR-21 |
+| **Estado** | Propuesto |
+| **Fecha** | Octubre 2026 (decidido por Aldana y Fede el 26/10/2026) |
+| **Depende de** | ADR-04, ADR-07, ADR-10 |
+| **Impacta en** | ADR-12, ADR-13 |
+
+### Contexto y Motivación
+
+El 11/8/2026 el equipo eligió un modelo **polyrepo**: cada alumno mantiene su propio repo
+(evaluable por separado) y la unión vive en un tercer repo neutral,
+`starlink-station-stack`. Sin embargo, la persistencia ambiental había quedado prevista
+dentro de *este* repo: `meteo_db` en el mismo `docker-compose.yml` y un único consumer
+que enrutaba por prefijo de tópico (`starlink/` → `starlink_health_db`, `meteo/` →
+`meteo_db`), con `MeteoDB` como stub a la espera del módulo de Fede
+(`src/consumer/db.py`).
+
+Esa mezcla dejaba el código del dominio ambiental repartido entre los dos repos. Entre el
+24 y el 25/10/2026, Fede implementó en el suyo (`tesis-sensor-node`) su propia
+TimescaleDB (`infrastructure/meteo-db/`) y su propio consumer (`services/meteo_consumer/`,
+con tests), siguiendo el modelo polyrepo.
+
+Seguía abierto desde el 19/8 un segundo punto: la semántica de `source` y `producer` en
+`env_metrics`. El DER de este repo usaba un único enum `source` (`local_sensor`,
+`api_open_meteo`, `api_omixom`…), y la nota del 19/8 proponía invertir los campos respecto
+de lo que ya usaba el código de Fede. Mientras tanto, el firmware real del ESP32 ya
+publica `"source":"real","producer":"bme280"` (verificado en el LIT el 16/10/2026).
+
+### Alternativas Consideradas
+
+| **Aspecto** | **Alt. A — Meteo dentro de este repo (consumer compartido + `MeteoDB`)** | **Alt. B — Cada módulo dueño de su DB y su consumer ✅** | **Alt. C — Monorepo** |
+| --- | --- | --- | --- |
+| Evaluación individual | ⚠️ El código ambiental de Fede queda en el repo de Aldana | ✅ Cada repo contiene solo su dominio | ❌ Historial y cobertura mezclados |
+| Aislamiento de fallos (ADR-10) | ✅ DBs separadas | ✅ DBs y consumers separados: un bug de parseo meteo no puede tumbar la ingesta Starlink | ✅ DBs separadas |
+| Acoplamiento de despliegue | ⚠️ Cada cambio de esquema meteo requiere un PR en este repo | ✅ Cada uno despliega su parte; la unión es solo un compose | ⚠️ Un solo pipeline para los dos |
+| Costo | ✅ Ya estaba parcialmente armado | ⚠️ Dos consumers (patrón duplicado) y un compose de integración | ❌ Migración completa de los dos repos |
+
+### Decisión
+
+**✅ Decisión: Alternativa B — cada módulo es dueño de su base de datos y de su consumer.**
+
+- **Dominio Starlink (este repo):** `consumer` se suscribe únicamente a
+  `starlink/metrics/+` y escribe en `starlink_health_db`. Se elimina el stub `MeteoDB` y
+  el enrutamiento de `meteo/*`.
+- **Dominio meteo (`tesis-sensor-node`):** `meteo_consumer` se suscribe a
+  `meteo/sensor/+` y `meteo/external/+` y escribe en su propia base `meteo_data`.
+- **Unión (`starlink-station-stack`):** un compose de integración levanta los servicios
+  de Fede en la misma red Docker que la pila de este repo, con un único broker (el de la
+  RPi5, que ya replica a la VM por ADR-20). Ningún repo contiene código del otro.
+- **Grafana y backend (este repo)** se conectan a `meteo_data` por variables de entorno
+  (`METEO_DB_HOST`, `METEO_DB_PORT`, `METEO_DB_NAME`, `METEO_DB_USER`,
+  `METEO_DB_PASSWORD`). La correlación red-clima sigue siendo *Data Blending* en Grafana
+  (ADR-10), sin escrituras cruzadas entre bases.
+
+**Contrato de `env_metrics` (acordado por los dos):**
+
+| Campo | Valores | Significado |
+| --- | --- | --- |
+| `source` | `real` \| `mock` | Naturaleza del dato: hardware/API real o simulado |
+| `producer` | `bme280`, `open_meteo`, `ohmc`, … | Productor concreto que generó la medición |
+| PK | `(time, node_id, source, producer)` | Un sensor real y su mock, o dos APIs, pueden coexistir en el mismo instante sin colisionar |
+
+El esquema SQL autoritativo es
+`tesis-sensor-node/infrastructure/meteo-db/init_meteo_data.sql`. `docs/06_DER.md` §4 y §7
+lo resumen y enlazan, sin copiarlo (mismo criterio anti-drift que
+`starlink-station-stack/README.md`).
+
+### Pros y Contras
+
+| **Aspecto** | **PRO ✅ / CONTRA ⚠️** | **Detalle** |
+| --- | --- | --- |
+| **Fronteras de repo = fronteras de dominio** | ✅ PRO | Coincide con el modelo polyrepo del 11/8 y con la evaluación individual. |
+| **Contrato alineado con el código real** | ✅ PRO | `source`/`producer` es lo que ya publican el firmware del ESP32, los mocks y los integradores de API de Fede: no hay que reescribir productores. |
+| **Database per Service llevado hasta el consumer** | ✅ PRO | Una falla de deserialización o de DB en un dominio no afecta la ingesta del otro (refuerza ADR-10). |
+| **Patrón de consumer duplicado** | ⚠️ CONTRA | Dos consumers con estructura similar. Mitigación: el contrato MQTT (QoS 1, sesión persistente, ACK manual) queda documentado en ADR-04/ADR-09 y aplica a los dos. |
+| **Los documentos del dominio meteo quedan en un repo sin ADR/SRS propios** | ⚠️ CONTRA | Por ahora `docs/06_DER.md` y `docs/07_API_REST.md` de este repo resumen el contrato y remiten al SQL de Fede. Si el repo de Fede incorpora sus propios documentos, estas secciones pasan a ser solo enlaces. |
+
+### Consecuencias e Implicaciones
+
+- `src/consumer/` deja de conocer el dominio meteo (`router.py`, `__main__.py`, `db.py`),
+  y la suite UT-03 se ajusta (`docs/08_Plan_QA.md`).
+- `GET /health` reporta `db_meteo_data` real cuando `METEO_DB_HOST` está configurado, y
+  `not_configured` si no lo está (pila de este repo levantada sola).
+- **Abierto:** quién implementa `GET /metrics/env*`, `POST /ingest/env` y
+  `telemetry.last_env_metric` de `GET /nodes`: el backend de este repo leyendo
+  `meteo_data`, o un servicio propio de Fede. Hasta decidirlo, siguen sin montarse.
+
 # APÉNDICES
 
 ## Apéndice A — Mapa de Dependencias entre ADRs
 
-El siguiente grafo muestra las relaciones de dependencia entre las 20 decisiones documentadas. Una flecha ADR-X → ADR-Y indica que ADR-Y depende de la decisión tomada en ADR-X.
+El siguiente grafo muestra las relaciones de dependencia entre las 21 decisiones documentadas. Una flecha ADR-X → ADR-Y indica que ADR-Y depende de la decisión tomada en ADR-X.
 
 | **ADR Base** | **ADRs que dependen de él** |
 | --- | --- |
 | ADR-01 (Serialización JSON+Pydantic) | ADR-04, ADR-06, ADR-07, ADR-08, ADR-11, ADR-16, ADR-17, ADR-18, ADR-19 |
 | ADR-02 (Sensor BME280 digital) | ADR-03, ADR-05, ADR-07 |
 | ADR-03 (ESP32 como Gateway) | ADR-04, ADR-05, ADR-07 |
-| ADR-04 (MQTT + ORM) | ADR-09, ADR-10, ADR-12, ADR-20 |
+| ADR-04 (MQTT + ORM) | ADR-09, ADR-10, ADR-12, ADR-20, ADR-21 |
 | ADR-05 (Python + C++) | ADR-06, ADR-07, ADR-08, ADR-09, ADR-12 |
 | ADR-06 (Mock Starlink Random Walk) | ADR-16, ADR-17, ADR-18 |
 | ADR-09 (Mosquitto MQTT) | ADR-10, ADR-12, ADR-20 |
-| ADR-10 (Database per Service) | ADR-11, ADR-12, ADR-13 |
+| ADR-10 (Database per Service) | ADR-11, ADR-12, ADR-13, ADR-21 |
 | ADR-11 (TimescaleDB) | ADR-12, ADR-13 |
 | ADR-12 (Docker) | Todos los ADRs son impactados por la contenerización |
 | ADR-13 (Grafana) | ADR-14, ADR-15 |
@@ -1412,6 +1505,9 @@ Este apéndice consolida las alternativas que fueron evaluadas seriamente pero n
 | Sub-objeto `alignment` anidado en el payload | ADR-18 | `network_metrics` es plana por naturaleza (columnas SQL); anidar obliga al consumer a aplanar sin ninguna ganancia real. |
 | Exponer `attitudeEstimationState` | ADR-18 | Enum string de estado interno del algoritmo de tracking, sin uso analítico directo para el objetivo de correlación clima-red del PI. |
 | Subir el umbral de `obstructionStats.fractionObstructed` en vez de cambiar de fuente | ADR-19 | Sigue siendo una fracción acumulada desde que arrancó la ventana de validación de la antena, no el estado instantáneo — cualquier umbral es arbitrario y no representa el momento de la medición. |
+| Meteo dentro de este repo (consumer compartido con `MeteoDB`) | ADR-21 | Mezcla el código del dominio ambiental en el repo de Aldana, contra el modelo polyrepo del 11/8 y la evaluación individual. |
+| Monorepo para los dos módulos | ADR-21 | Historial, cobertura y pipelines mezclados; migración completa de los dos repos sin beneficio técnico. |
+| Enum único `source` (`local_sensor`, `api_open_meteo`, …) | ADR-21 | Mezcla dos dimensiones (real/mock y quién produce) en un solo campo; el firmware, los mocks y los integradores ya publican `source`/`producer` separados. |
 | Dejar `is_obstructed` en `null` siempre (real) | ADR-19 | Pierde el campo por completo para el módulo real, contradice RF-03 y descarta un correlato directo con el objetivo del PI. |
 
 ## Comments

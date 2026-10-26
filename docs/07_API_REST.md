@@ -379,6 +379,8 @@ Retorna la medición más reciente registrada para el nodo solicitado. Consulta:
 | **Tag: meteo — Datos ambientales y meteorológicos** |
 | --- |
 
+> **Enmienda ADR-21 (26/10/2026):** `meteo_data` es propiedad del módulo de Fede (`tesis-sensor-node`). El origen del dato se describe con `source` (`real` \| `mock`) y `producer` (`bme280`, `open_meteo`, `ohmc`, …), no con el enum `local_sensor`/`api_*` anterior. Donde los ejemplos de esta sección muestran ese enum, la correspondencia es: `local_sensor` → `source=real, producer=bme280`; `api_open_meteo` → `producer=open_meteo`; `api_omixom` → `producer=ohmc`; `mock_bme280` → `source=mock, producer=bme280`. Los resúmenes y la última medición se agrupan por (`source`, `producer`). **Estado:** estos endpoints siguen sin montarse; está abierto si los implementa el backend de este repo (leyendo `meteo_data` por `METEO_DB_*`) o un servicio de Fede (ver ADR-21).
+
 | **GET** | **/api/v1/metrics/env** | Series temporales de datos ambientales | *Tag: meteo* |
 | --- | --- | --- | --- |
 
@@ -393,7 +395,8 @@ Análogo a GET /metrics/starlink pero para la DB meteo_data. Retorna datos de la
 | **node_id** | string | **Sí** | — | ID del nodo de medición. | lit-cordoba-01 |
 | **start** | datetime (ISO 8601) | **Sí** | — | Inicio del rango temporal, inclusive. | 2026-06-01T00:00:00Z |
 | **end** | datetime (ISO 8601) | **Sí** | — | Fin del rango temporal, inclusive. | 2026-06-07T23:59:59Z |
-| **source** | enum (CSV) | No | all | Filtrar por fuente: 'local_sensor', 'api_open_meteo', 'api_owm', 'api_smn', 'api_omixom'. Acepta lista separada por comas. 'all' incluye todas las fuentes. | local_sensor,api_open_meteo |
+| **source** | enum | No | all | Filtrar por naturaleza del dato: 'real', 'mock' o 'all' (ADR-21). | real |
+| **producer** | string (CSV) | No | all | Filtrar por productor: 'bme280', 'open_meteo', 'ohmc', … Acepta lista separada por comas (ADR-21). | bme280,ohmc |
 | **fields** | string (CSV) | No | all | Campos de datos ambientales a incluir. Valores: temperature_c, humidity_pct, pressure_hpa, precipitation_mm, wind_speed_kmh, wind_direction_deg, cloud_cover_pct. | temperature_c,humidity_pct,pressure_hpa |
 | **resolution** | enum | No | auto | 'raw' (datos crudos), 'hourly' (CAGG env_hourly), 'auto' (raw < 6h, hourly >= 6h). | hourly |
 | **limit** | integer | No | 500 | Máximo de registros por página. Rango: 1–5000. | 1000 |
@@ -422,7 +425,8 @@ Análogo a GET /metrics/starlink pero para la DB meteo_data. Retorna datos de la
 | **node_id** | string | **Sí** | — | ID del nodo. | lit-cordoba-01 |
 | **start** | datetime (ISO 8601) | **Sí** | — | Inicio del período. | 2026-06-01T00:00:00Z |
 | **end** | datetime (ISO 8601) | **Sí** | — | Fin del período. | 2026-06-07T23:59:59Z |
-| **source** | enum (CSV) | No | all | Fuente(s) a incluir en el cálculo. | local_sensor |
+| **source** | enum | No | all | 'real', 'mock' o 'all' (ADR-21). | real |
+| **producer** | string (CSV) | No | all | Productor(es) a incluir en el cálculo (ADR-21). | bme280 |
 
 ### **Respuesta exitosa — HTTP 200**
 
@@ -445,7 +449,8 @@ Análogo a GET /metrics/starlink pero para la DB meteo_data. Retorna datos de la
 | **Parámetro** | **Tipo** | **Req.** | **Default** | **Descripción** | **Ejemplo** |
 | --- | --- | --- | --- | --- | --- |
 | **node_id** | string | No | all | ID del nodo. Sin parámetro, retorna la última medición de todos los nodos. | lit-cordoba-01 |
-| **source** | enum | No | all | Filtrar por fuente. | local_sensor |
+| **source** | enum | No | all | 'real', 'mock' o 'all' (ADR-21). | real |
+| **producer** | string | No | all | Filtrar por productor (ADR-21). | bme280 |
 
 ### **Respuesta exitosa — HTTP 200**
 
@@ -545,7 +550,7 @@ Recibe un payload JSON con el esquema de telemetría Starlink (idéntico al paqu
 
 ### **Request Body — application/json**
 
-| {   "station_id":     "lit-cordoba-01",   "timestamp":      "2026-06-01T14:30:00Z",   "source_module":  "mock_bme280",   "schema_version": "1.0",   "metrics": {     "temperature_c":    18.5,     "humidity_pct":     62.3,     "pressure_hpa":     1013.2,     "precipitation_mm": null,     "wind_speed_kmh":   null,     "wind_direction_deg": null,     "cloud_cover_pct":  null,     "source":           "local_sensor"     // campo que mapea a env_metrics.source   } } |
+| // Enmienda ADR-21: el body sigue el envelope EnvPayloadIn de tesis-sensor-node: { "node_id", "timestamp", "source": "real"|"mock", "producer": "bme280", "schema_version", "metrics": {..., "sensor_uid"} }, sin "station_id"/"source_module" ni "source" dentro de metrics. Texto anterior: {   "station_id":     "lit-cordoba-01",   "timestamp":      "2026-06-01T14:30:00Z",   "source_module":  "mock_bme280",   "schema_version": "1.0",   "metrics": {     "temperature_c":    18.5,     "humidity_pct":     62.3,     "pressure_hpa":     1013.2,     "precipitation_mm": null,     "wind_speed_kmh":   null,     "wind_direction_deg": null,     "cloud_cover_pct":  null,     "source":           "local_sensor"     // campo que mapea a env_metrics.source   } } |
 | --- |
 
 ### **Respuesta exitosa — HTTP 201**
@@ -572,7 +577,7 @@ Todos los modelos de entrada y salida están definidos como clases Pydantic v2. 
 
 ## **9.2 Modelos de Datos Ambientales**
 
-| class EnvSource(str, Enum):     """Valores válidos de source — coherentes con CHECK constraint de env_metrics."""     LOCAL_SENSOR    = "local_sensor"     API_OPEN_METEO  = "api_open_meteo"     API_OWM         = "api_owm"     API_SMN         = "api_smn"     API_OMIXOM      = "api_omixom"     MOCK_BME280     = "mock_bme280"     MOCK_API        = "mock_api" class EnvMetricsIn(BaseModel):     temperature_c:      Optional[float] = Field(None, gt=-50, lt=80)     humidity_pct:       Optional[float] = Field(None, ge=0, le=100)     pressure_hpa:       Optional[float] = Field(None, gt=800, lt=1100)     precipitation_mm:   Optional[float] = Field(None, ge=0)     wind_speed_kmh:     Optional[float] = Field(None, ge=0)     wind_direction_deg: Optional[int]   = Field(None, ge=0, lt=360)     cloud_cover_pct:    Optional[float] = Field(None, ge=0, le=100)     source:             EnvSource       = EnvSource.LOCAL_SENSOR class EnvPayloadIn(BaseModel):     station_id:     str      = Field(..., min_length=3, max_length=64)     timestamp:      datetime     source_module:  str      = Field(..., max_length=64)     schema_version: str      = Field(default="1.0")     metrics:        EnvMetricsIn |
+| # Enmienda ADR-21: EnvSource se reemplaza por source: Literal['real', 'mock'] + producer: str (1-64). Modelo autoritativo: tesis-sensor-node/services/meteo_consumer/src/models.py (EnvPayloadIn, EnvMetrics con sensor_uid, extra='forbid', timestamp con zona horaria obligatoria). Texto anterior conservado por trazabilidad: class EnvSource(str, Enum):     """Valores válidos de source — coherentes con CHECK constraint de env_metrics."""     LOCAL_SENSOR    = "local_sensor"     API_OPEN_METEO  = "api_open_meteo"     API_OWM         = "api_owm"     API_SMN         = "api_smn"     API_OMIXOM      = "api_omixom"     MOCK_BME280     = "mock_bme280"     MOCK_API        = "mock_api" class EnvMetricsIn(BaseModel):     temperature_c:      Optional[float] = Field(None, gt=-50, lt=80)     humidity_pct:       Optional[float] = Field(None, ge=0, le=100)     pressure_hpa:       Optional[float] = Field(None, gt=800, lt=1100)     precipitation_mm:   Optional[float] = Field(None, ge=0)     wind_speed_kmh:     Optional[float] = Field(None, ge=0)     wind_direction_deg: Optional[int]   = Field(None, ge=0, lt=360)     cloud_cover_pct:    Optional[float] = Field(None, ge=0, le=100)     source:             EnvSource       = EnvSource.LOCAL_SENSOR class EnvPayloadIn(BaseModel):     station_id:     str      = Field(..., min_length=3, max_length=64)     timestamp:      datetime     source_module:  str      = Field(..., max_length=64)     schema_version: str      = Field(default="1.0")     metrics:        EnvMetricsIn |
 | --- |
 
 # **10. Configuración del Datasource HTTP en Grafana**
@@ -623,6 +628,7 @@ FastAPI genera automáticamente el documento OpenAPI completo en GET /api/v1/ope
 | **Versión** | **Fecha** | **Autores** | **Descripción** |
 | --- | --- | --- | --- |
 | 1.0 | Junio 2026 | Pavet García, Isaia Soria | Versión inicial. 12 endpoints definidos. Autenticación API Key. Esquemas Pydantic v2. Fragmento OpenAPI 3.1. Configuración Grafana Infinity datasource. |
+| 1.1 | Octubre 2026 | Pavet García, Isaia Soria | ADR-21: contrato ambiental `source` (`real`/`mock`) + `producer`; `meteo_data` pasa al módulo de Fede; quién implementa los endpoints `meteo` queda abierto. |
 
 *— Fin del documento —*
 

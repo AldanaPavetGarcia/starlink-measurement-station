@@ -1670,3 +1670,41 @@ del repo de Fede, sin pushear ni PR.
 
 Runbook completo (diagnóstico, códigos de error, comandos, verificación y pendientes) en el
 repo de integración: `starlink-station-stack/docs/ESP32_WIFI_MQTT.md`.
+
+### 2026-10-26 — Unión con el módulo de Fede: opción B (ADR-21) y E2E local
+
+**Decisión (Aldana y Fede):** cada módulo es dueño de su base y de su consumer. El dominio
+meteo (`meteo_data` + `meteo_consumer`) vive en `tesis-sensor-node`, donde Fede ya lo
+implementó (ramas `feature/meteo-persistence` y `feature/meteo-consumer`, 24-25/10). La
+unión es un compose en `starlink-station-stack` (`infra/rpi5-union/`) que suma esa pila a
+la red Docker de esta (`starlink-station-net`). Contrato de `env_metrics`: `source` ∈
+{`real`, `mock`}, `producer` = productor concreto, PK `(time, node_id, source, producer)`.
+Registrado como **ADR-21** acá y ADR-02 en `starlink-station-stack`.
+
+Cambios en este repo:
+- Docs: ADR-21 nuevo con enmiendas en ADR-04, ADR-10, ADR-12, ADR-13 y apéndices; DER §4,
+  §6, §7.2 (remite al SQL de Fede, no lo copia) y §8; SRS §5.2, §5.3, IF-06, RF-21 y RF-22;
+  API §"Tag: meteo" y §9.2 (endpoints meteo siguen sin montarse, quién los implementa queda
+  abierto); Plan QA UT-02, UT-03, IT-02 e ítem 9; CLAUDE.md.
+- Consumer: solo `starlink/metrics/+`. Se eliminó el stub `MeteoDB` y el enrutamiento de
+  `meteo/*`; UT-03-02/03 verifican ahora que meteo **no** llegue a la DB de red.
+- Backend: `/health` hace ping real a `meteo_data` si `METEO_DB_HOST` está configurado
+  (`not_configured` si no), con test nuevo.
+- Grafana: datasource `meteo_data` (por `METEO_DB_*`) y dashboard "Correlación Red-Clima"
+  (`correlacion_red_clima.json`, 7 paneles: latencia/temperatura, pérdida/humedad,
+  throughput/presión, variables ambientales por productor, último dato por productor).
+- Compose: red con nombre fijo (`STARLINK_NETWORK_NAME`) y `METEO_DB_*` en backend y Grafana.
+
+Tests: 190 pasan, cobertura 95%.
+
+**E2E local (PC, las dos pilas con mocks):** un payload con el formato exacto del ESP32
+(`source=real`, `producer=bme280`) llega a `env_metrics` y convive con el mock
+(`source=mock`); `/health` ve `db_meteo_data` en `up`; los dos datasources de Grafana dan
+OK y las 10 consultas del dashboard devuelven datos; el consumer de este repo no procesa
+nada de `meteo/*`. Hallazgo: un payload con `pressure_hpa=667.95` (lo que leía el sketch
+de prueba el 16/10) se **rechaza** por rango, así que el BME280 hay que revisarlo antes
+de esperar datos reales.
+
+**Pendiente:** corrida en la RPi5 con el ESP32 (runbook en
+`starlink-station-stack/docs/E2E_RPI5.md`), merge de las ramas de Fede, imágenes de Fede
+en GHCR, y decidir quién implementa `/metrics/env*`.

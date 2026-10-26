@@ -1,7 +1,7 @@
 """
-Entrypoint del consumer: se suscribe a los tópicos de datos del broker MQTT y
-enruta cada mensaje a la DB que corresponda vía ConsumerRouter (`python -m
-consumer`).
+Entrypoint del consumer: se suscribe a los tópicos de telemetría Starlink del
+broker MQTT y persiste cada mensaje vía ConsumerRouter (`python -m consumer`).
+El dominio meteo tiene su propio consumer en `tesis-sensor-node` (ADR-21).
 
 Cubre los requisitos de CLAUDE.md §1.1 / docs/03_SRS.md para este componente:
 reconexión automática (RNF-05), sesión persistente + QoS 1 con ACK manual
@@ -18,12 +18,10 @@ from paho.mqtt.properties import PacketTypes, Properties
 
 from common import connect_with_retry, set_credentials_if_present, setup_logging
 
-from .db import MeteoDB, NetHealthDB
+from .db import NetHealthDB
 from .router import ConsumerRouter
 
 TOPIC_STARLINK = "starlink/metrics/+"
-TOPIC_METEO_SENSOR = "meteo/sensor/+"
-TOPIC_METEO_EXTERNAL = "meteo/external/+"
 
 # ADR-09: sesión persistente -- el consumer no debe perder mensajes QoS 1
 # publicados mientras estaba caído. 0xFFFFFFFF = la sesión no expira (MQTTv5).
@@ -36,7 +34,7 @@ def main() -> None:
     mqtt_host = os.environ.get("MQTT_HOST", "localhost")
     mqtt_port = int(os.environ.get("MQTT_PORT", "1883"))
 
-    router = ConsumerRouter(net_db=NetHealthDB.from_env(), meteo_db=MeteoDB())
+    router = ConsumerRouter(net_db=NetHealthDB.from_env())
 
     client = mqtt.Client(
         mqtt.CallbackAPIVersion.VERSION2,
@@ -49,9 +47,7 @@ def main() -> None:
     def on_connect(client, userdata, flags, reason_code, properties):
         if reason_code == 0:
             logger.info("conectado al broker")
-            client.subscribe(
-                [(TOPIC_STARLINK, 1), (TOPIC_METEO_SENSOR, 1), (TOPIC_METEO_EXTERNAL, 1)]
-            )
+            client.subscribe([(TOPIC_STARLINK, 1)])
         else:
             logger.error("conexión rechazada por el broker", extra={"rc": str(reason_code)})
 
