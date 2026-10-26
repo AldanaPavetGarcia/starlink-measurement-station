@@ -1652,3 +1652,21 @@ documentos autoritativos de este repo:
 Sigue pendiente (no bloqueante, anotado en `tesis-sensor-node/docs/DISEÑO_INTEGRADOR_CLIMA.md`):
 decidir si `api_smn` (código ya escrito, sin probar contra respuesta real) se despliega
 en paralelo o queda de respaldo ahora que Omixom/OHMC ya cumple RF-11 solo.
+
+### 2026-10-16 — ESP32 del nodo ambiental conectado al broker de la RPi5 por WiFi/MQTT
+
+Apoyo al módulo de Fede: el ESP32 entraba al WiFi `LCD` pero no transmitía. **No era la red**:
+era un bug del firmware (`tesis-sensor-node`, `include/MqttService.h`). El cliente MQTT
+(`256dpi/MQTT@2.5.3`) tenía un buffer de escritura de 128 bytes (`mqttClient_{512, 128}`) y
+el paquete CONNECT con el LWT ocupa ~154, así que fallaba con `Error=-1`
+(`LWMQTT_BUFFER_TOO_SHORT`) antes de enviarse. Con `{512, 512}` conecta al primer intento, y
+el estado `online` llega al broker de la RPi5 (`172.18.147.143:1883`) cada 30 s.
+
+Se descartaron, probando desde una laptop en `LCD`: IP del broker incorrecta, aislamiento de
+clientes y NTP bloqueado (en `LCD` el NTP sí sale). No hizo falta convertir la RPi5 en access
+point. **Pendiente**: el BME280 no se detecta en la placa probada (todavía no llegan
+mediciones), y el arreglo está commiteado (`1818c11`) en la rama local `fix/mqtt-write-buffer`
+del repo de Fede, sin pushear ni PR.
+
+Runbook completo (diagnóstico, códigos de error, comandos, verificación y pendientes) en el
+repo de integración: `starlink-station-stack/docs/ESP32_WIFI_MQTT.md`.
