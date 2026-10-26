@@ -9,8 +9,9 @@ Módulo de adquisición de telemetría de red Starlink (latencia, jitter, throug
 En desarrollo. Semanas 1 a 12 cerradas del lado individual de Aldana (ver
 `docs/PROGRESS.md` para el detalle y lo pendiente de coordinar con Fede). Pipeline
 completo corriendo end-to-end con mocks (perfil `mocks`) o contra hardware real
-(perfil `real`, semana 10 — mapeo validado contra la antena real el 12/08/2026,
-todavía sin correr como pila Docker completa en la RPi5, ver §Extractor real):
+(perfil `real`, semana 10 — la pila completa corre en la RPi5 del LIT contra la
+antena real desde el 14/08/2026, ver §Extractor real). El módulo meteo de Fede se
+suma a esta pila desde `starlink-station-stack` (ADR-21, ver §Con el módulo meteo):
 
 ```
 mock_starlink (Random Walk + caos)  ─┐
@@ -29,21 +30,22 @@ mock_starlink (Random Walk + caos)  ─┐
 - Broker MQTT (Mosquitto v5.0, QoS 1, LWT).
 - Consumer MQTT → TimescaleDB (ORM SQLAlchemy, ADR-04) con ACK manual: solo confirma
   el mensaje si quedó persistido o el error es permanente, fuerza reentrega QoS 1 ante
-  fallos transitorios de DB. Dominio meteo (Fede) ya enrutado, pendiente de que él
-  implemente su persistencia real.
+  fallos transitorios de DB. Solo procesa `starlink/metrics/+`: el dominio meteo
+  tiene su propio consumer y su propia DB en el repo de Fede (ADR-21).
 - Tres bases de datos independientes (ADR-10): `starlink_health_db` (métricas de red),
-  `station_config_db` (catálogo de nodos/sensores), y `meteo_db` (pendiente, Fede).
+  `station_config_db` (catálogo de nodos/sensores), y `meteo_data` (de Fede, en
+  `tesis-sensor-node`; acá solo se lee desde Grafana y `/health`, ADR-21).
 - Backend API REST (FastAPI, semana 9): `GET /health`, `GET /metrics/starlink*`,
   `GET /nodes*`, `POST /ingest/starlink` (testing/backfill). Auth por `X-API-Key`.
 - Extractor real (semana 10): reemplaza al mock contra la antena física vía `grpcurl`
   (server reflection) — mismo tópico/morfología de paquete. Mapeo validado
-  campo a campo contra la antena real el 12/08/2026 (ver `docs/PROGRESS.md`);
-  falta correrlo como servicio Docker continuo en la RPi5 (Docker Engine
-  todavía no instalado ahí) y las 72h de CA-01/CA-02.
+  campo a campo contra la antena real el 12/08/2026 y corriendo como servicio
+  Docker continuo en la RPi5 desde el 14/08/2026 (ver `docs/PROGRESS.md`).
 - Dashboard Grafana "Red Starlink" provisionado como código (ADR-13): latencia/jitter,
   packet loss, throughput, satélites/obstrucción/SNR bajo, handovers por hora,
-  alineación de la antena, histograma de latencia.
-- Suite de tests (183 pasando, ~95% de cobertura sobre el código unit-testeable — ver
+  alineación de la antena, histograma de latencia. Dashboard "Correlación Red-Clima"
+  (RF-33, CA-04) que cruza `starlink_health_db` con `meteo_data` de Fede (ADR-21).
+- Suite de tests (190 pasando, ~95% de cobertura sobre el código unit-testeable — ver
   `.coveragerc`), suite de integración IT-01 automatizada (`tests/integration/`, corre
   contra Docker real), CI en GitHub Actions (`.github/workflows/`). Skill de control de
   consistencia ADR/DER/SRS/API (`adr-check`) activa.
@@ -118,6 +120,36 @@ Ver la sección "Mecanismo concreto de filtrado de IP" de ADR-14 en
 `docs/05_ADR.md` para el detalle y el caso de acceso remoto puntual del
 director/co-director.
 
+### Con el módulo meteo (unión con Fede)
+
+Este repo no levanta nada del dominio meteo (ADR-21). La DB `meteo_data` y su
+consumer viven en [`tesis-sensor-node`](https://github.com/BlastNeos/tesis-sensor-node)
+y se suman a esta pila con el compose de integración de
+[`starlink-station-stack`](https://github.com/AldanaPavetGarcia/starlink-station-stack)
+(`infra/rpi5-union/`), que se une a la red Docker `starlink-station-net` de esta pila.
+Un solo broker: el de este repo.
+
+Los tres repos clonados lado a lado:
+
+```bash
+# 1. Esta pila, con METEO_DB_* y STARLINK_NETWORK_NAME en el .env (ver .env.example):
+#    METEO_DB_HOST=meteo_db  METEO_DB_PORT=5432  METEO_DB_NAME=meteo_data
+#    METEO_DB_USER=meteo_app METEO_DB_PASSWORD=meteo_dev_password
+docker compose --profile mocks up -d --build          # en la PC
+# en la RPi5 (perfil real, sin mock_starlink):
+# docker compose up -d --build broker acquisition starlink_db station_config_db consumer backend grafana
+
+# 2. La pila meteo de Fede, desde starlink-station-stack:
+cd ../starlink-station-stack/infra/rpi5-union
+cp .env.example .env                                  # TESIS_SENSOR_NODE_DIR apunta al clon de Fede
+docker compose up -d --build                          # con el ESP32 real
+docker compose --profile meteo-mocks up -d --build    # o con los mocks de Fede
+```
+
+Sin `METEO_DB_HOST` esta pila funciona igual sola: `/health` reporta
+`db_meteo_data: not_configured` y los paneles de "Correlación Red-Clima" quedan vacíos.
+Verificación paso a paso y vuelta atrás: `docs/E2E_RPI5.md` de `starlink-station-stack`.
+
 ## Mock Starlink
 
 Publica cada `60/TIME_WARP_FACTOR` segundos en `starlink/metrics/<node_id>` y anuncia
@@ -138,7 +170,7 @@ PYTHONPATH=src MQTT_HOST=localhost python -m mock_starlink
 
 ## Consumer
 
-Se suscribe a `starlink/metrics/+`, `meteo/sensor/+` y `meteo/external/+`, valida cada
+Se suscribe solo a `starlink/metrics/+` (ADR-21), valida cada
 paquete Starlink con el mismo modelo Pydantic que publica el mock (`StarlinkPayloadIn`,
 ADR-01 — nada de esquemas duplicados) e inserta en `network_metrics` vía ORM SQLAlchemy
 (ADR-04), con `ON CONFLICT (time, node_id) DO NOTHING` para tolerar reentregas QoS 1
@@ -147,9 +179,9 @@ inserción falla por un error transitorio de DB, el mensaje no se ACKea y el bro
 reentrega; si el payload es inválido, se loguea y se descarta (no tiene sentido
 reintentar un error permanente).
 
-El dominio meteo ya está enrutado (`ConsumerRouter`) pero `MeteoDB` es un stub sin
-persistencia real — pendiente de que Fede tenga su mock/tópico y complete su propio
-gateway, siguiendo el mismo patrón que `NetHealthDB`.
+Los tópicos `meteo/*` no son de este consumer: los procesa el `meteo_consumer` de
+Fede (`tesis-sensor-node`), que escribe en su propia DB `meteo_data` (ADR-21). Si
+llega alguno acá, `ConsumerRouter` lo loguea como tópico desconocido y lo descarta.
 
 Para correrlo fuera de Docker (contra un broker y una DB ya levantados):
 
@@ -164,7 +196,7 @@ Starlink únicamente — `/metrics/env*`/`POST /ingest/env` son de Fede, no mont
 
 | Endpoint | Auth | Descripción |
 |---|---|---|
-| `GET /api/v1/health` | No | Estado de `starlink_health_db` + broker MQTT (TCP check liviano). `db_meteo_data` reporta `not_configured` — dominio de Fede, todavía no implementado. |
+| `GET /api/v1/health` | No | Estado de `starlink_health_db` + broker MQTT (TCP check liviano). `db_meteo_data`: `up` (con `last_write` de `env_metrics`) o `down` si `METEO_DB_HOST` está configurado, `not_configured` si no (ADR-21). |
 | `GET /api/v1/metrics/starlink` | Sí | Serie temporal, `resolution=auto` elige entre `network_metrics` (raw), `net_hourly`, `net_daily` según el rango. |
 | `GET /api/v1/metrics/starlink/summary` | Sí | Estadísticas agregadas del período (avg/p50/p95/p99, disponibilidad, eventos de obstrucción). |
 | `GET /api/v1/metrics/starlink/latest` | Sí | Última medición por nodo. |
@@ -195,13 +227,14 @@ contenedor `mock_starlink` del perfil `mocks`.
 capturado de la antena (`grpcurl` vía SSH a la RPi5) — encontró y corrigió 3
 mismatches con lo asumido en ADR-16/17/18 (`snr_low`, `is_obstructed`, rango de
 `boresight_azimuth_deg`), ver `docs/PROGRESS.md` §Semana 10 para el detalle.
-⚠️ Todavía **no corrido como servicio Docker continuo en la RPi5** (Docker Engine
-no está instalado ahí) ni las 72h de CA-01/CA-02.
+✅ Corriendo como servicio Docker continuo en la RPi5 desde el 14/08/2026, con el
+resto de la pila en la misma máquina (corrida de 72h de CA-01/CA-02 y su estado en
+`docs/PROGRESS.md`).
 
 ```bash
-# en la RPi5, con el resto del stack ya levantado (docker compose --profile mocks
-# up -d broker starlink_db station_config_db backend grafana) y sin mock_starlink corriendo:
-docker compose --profile real up --build acquisition
+# en la RPi5: los 7 servicios de producción, nombrados explícitamente (activa sus
+# perfiles sin levantar mock_starlink):
+docker compose up -d --build broker acquisition starlink_db station_config_db consumer backend grafana
 ```
 
 ## Bases de datos
@@ -214,7 +247,10 @@ docker compose --profile real up --build acquisition
   series temporales): `station_metadata` (nodos registrados, seedeada con
   `lit-cordoba-01`) y `sensor_catalog` (sensores por nodo, FK a `station_metadata`).
   Script: `services/db/init_station_config.sql`.
-- **`meteo_db`**: pendiente, módulo de Fede.
+- **`meteo_data`** (TimescaleDB, de Fede): `env_metrics` con PK
+  `(time, node_id, source, producer)`, `source` ∈ {`real`, `mock`}. No se crea en este
+  repo: el script es `tesis-sensor-node/infrastructure/meteo-db/init_meteo_data.sql`
+  (ADR-21, `docs/06_DER.md` §4).
 
 ## Grafana
 
@@ -222,8 +258,10 @@ Datasource y dashboard provisionados como código (ADR-13), sin pasos manuales:
 
 ```
 services/grafana/provisioning/datasources/starlink.yml   # datasource starlink_health_db
+services/grafana/provisioning/datasources/meteo.yml      # datasource meteo_data (DB de Fede, METEO_DB_*)
 services/grafana/provisioning/dashboards/dashboards.yml  # provider de dashboards
 services/grafana/dashboards/red_starlink.json            # dashboard "Red Starlink"
+services/grafana/dashboards/correlacion_red_clima.json   # dashboard "Correlación Red-Clima" (RF-33, CA-04)
 ```
 
 ## Estructura
