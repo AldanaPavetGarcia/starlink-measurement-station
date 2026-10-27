@@ -53,6 +53,21 @@ def test_health_degradado_si_las_dbs_no_estan_disponibles():
     assert body["components"]["db_meteo_data"]["status"] == "not_configured"
 
 
+def test_health_reporta_meteo_down_si_esta_configurada_pero_no_responde(monkeypatch):
+    """ADR-21: con METEO_DB_HOST configurado, /health hace ping real a
+    meteo_data (la DB de Fede) y la reporta "down" si no responde."""
+    from backend import config, db
+
+    monkeypatch.setattr(config, "METEO_DB_HOST", "localhost")
+    monkeypatch.setattr(config, "METEO_DB_PORT", "59999")
+    monkeypatch.setattr(db, "_meteo_engine", None)
+
+    body = client.get("/api/v1/health").json()
+
+    assert body["components"]["db_meteo_data"]["status"] == "down"
+    assert body["status"] == "degraded"
+
+
 # ---------------------------------------------------------------------------
 # Auth (docs/07_API_REST.md §2.1) -- 401 antes de tocar cualquier DB
 # ---------------------------------------------------------------------------

@@ -2,9 +2,11 @@
 Router de tópicos MQTT -> Database per Service (ADR-04, ADR-10).
 
 `ConsumerRouter.route_message` es el punto de entrada único del consumer:
-decide, según el prefijo del tópico, a qué DB gateway (NetHealthDB/MeteoDB)
-enrutar el payload ya parseado (dict, no bytes -- decodificar el JSON crudo
-de MQTT es responsabilidad de `__main__.py`, para que esta función sea
+decide, según el prefijo del tópico, si el payload ya parseado va a la DB
+de red (NetHealthDB). Desde ADR-21 el dominio meteo no pasa por acá: tiene su
+propio consumer en `tesis-sensor-node`, así que un tópico `meteo/*` se trata
+como desconocido. El payload ya llega parseado (dict, no bytes -- decodificar
+el JSON crudo de MQTT es responsabilidad de `__main__.py`, para que esta función sea
 testeable con dicts sin necesidad de un broker real, ver suite UT-03 de
 docs/08_Plan_QA.md).
 
@@ -27,8 +29,6 @@ from mock_starlink.schema import StarlinkPayloadIn
 logger = logging.getLogger("consumer")
 
 TOPIC_PREFIX_STARLINK = "starlink/metrics/"
-TOPIC_PREFIX_METEO_SENSOR = "meteo/sensor/"
-TOPIC_PREFIX_METEO_EXTERNAL = "meteo/external/"
 
 
 class _InsertDB(Protocol):
@@ -61,15 +61,12 @@ def starlink_row(payload: StarlinkPayloadIn) -> dict[str, Any]:
 
 
 class ConsumerRouter:
-    def __init__(self, net_db: _InsertDB, meteo_db: _InsertDB) -> None:
+    def __init__(self, net_db: _InsertDB) -> None:
         self.net_db = net_db
-        self.meteo_db = meteo_db
 
     def route_message(self, topic: str, payload: dict[str, Any]) -> bool:
         if topic.startswith(TOPIC_PREFIX_STARLINK):
             return self._route_starlink(topic, payload)
-        if topic.startswith(TOPIC_PREFIX_METEO_SENSOR) or topic.startswith(TOPIC_PREFIX_METEO_EXTERNAL):
-            return self._route_meteo(topic, payload)
 
         logger.warning("tópico desconocido, mensaje descartado", extra={"topic": topic})
         return True
@@ -90,17 +87,6 @@ class ConsumerRouter:
             logger.error(
                 "fallo al insertar en network_metrics, se retiene el ACK MQTT",
                 extra={"topic": topic, "node_id": validated.node_id, "rc": str(exc)},
-            )
-            return False
-        return True
-
-    def _route_meteo(self, topic: str, payload: dict[str, Any]) -> bool:
-        try:
-            self.meteo_db.insert(payload)
-        except Exception as exc:  # noqa: BLE001
-            logger.error(
-                "fallo al insertar en env_metrics, se retiene el ACK MQTT",
-                extra={"topic": topic, "rc": str(exc)},
             )
             return False
         return True

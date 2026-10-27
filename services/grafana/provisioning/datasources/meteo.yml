@@ -1,0 +1,24 @@
+# ADR-21: meteo_data es la DB del módulo de Fede (tesis-sensor-node), no de
+# este repo. Grafana la alcanza por nombre dentro de la red Docker compartida
+# que arma el compose de integración (starlink-station-stack). Sin
+# METEO_DB_HOST (esta pila levantada sola) el datasource queda cargado pero sin
+# conexión: los paneles de correlación muestran error y el resto de Grafana
+# funciona igual. uid fijo para que correlacion_red_clima.json lo referencie.
+apiVersion: 1
+
+datasources:
+  - name: meteo_data
+    uid: meteo_data
+    type: postgres
+    access: proxy
+    url: ${METEO_DB_HOST}:${METEO_DB_PORT}
+    database: ${METEO_DB_NAME}
+    user: ${METEO_DB_USER}
+    secureJsonData:
+      password: ${METEO_DB_PASSWORD}
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: true
+    isDefault: false
+    editable: false

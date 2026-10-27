@@ -182,6 +182,7 @@ Detalle completo y alternativas rechazadas: `docs/05_ADR.md`, Apéndice B.
 | ADR-13 | **Grafana OSS** para visualización, dashboards como código (JSON provisioning) | Se descartó frontend a medida (React/Vue): semanas de desarrollo sin valor directo para la investigación de redes. |
 | ADR-14 | **Postura Zero Trust local**: solo el puerto de Grafana se expone externamente, con filtrado de IP | — |
 | ADR-15 | Mock de videomonitoreo: **microservicio Flask con stream MJPEG a 5 FPS, JPEG quality 50** | Consumo estimado 200–400 kbps (~0.2% del ancho de banda Starlink), despreciable para las mediciones. Sobre placeholder JPG estático (no valida streaming real). |
+| ADR-21 | **Cada módulo es dueño de su DB y su consumer** (26/10/2026): meteo (`meteo_data` + `meteo_consumer`) vive en `tesis-sensor-node`; este consumer solo procesa `starlink/metrics/+`. Contrato `env_metrics`: `source` ∈ {`real`, `mock`}, `producer` = productor concreto, PK `(time, node_id, source, producer)` | Unión en `starlink-station-stack` (compose de integración, red Docker `starlink-station-net`). Grafana/backend leen `meteo_data` por `METEO_DB_*`. |
 
 ## 5. Estrategia de mocks (desarrollo sin hardware)
 
@@ -267,7 +268,7 @@ Dos DBs separadas (ADR-10), ambas PostgreSQL+TimescaleDB:
 
 - **starlink_health_db**: `network_metrics` (hypertable), `network_tests`, continuous
   aggregates `net_hourly` / `net_daily`.
-- **meteo_db**: `env_metrics` (hypertable), continuous aggregate `env_hourly`.
+- **meteo_data** (DB de Fede, en `tesis-sensor-node` — ADR-21): `env_metrics` (hypertable, PK `time, node_id, source, producer`), continuous aggregate `env_hourly`.
 - Metadata compartida/relacional: `station_metadata`, `sensor_catalog`.
 
 Detalle de columnas, tipos, índices y políticas de retención: `docs/06_DER.md`.

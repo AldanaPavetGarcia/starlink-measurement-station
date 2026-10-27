@@ -32,6 +32,7 @@ STARLINK_METRIC_FIELDS = (
 
 _starlink_engine: Engine | None = None
 _station_config_engine: Engine | None = None
+_meteo_engine: Engine | None = None
 
 
 def starlink_engine() -> Engine:
@@ -54,6 +55,21 @@ def station_config_engine() -> Engine:
         )
         _station_config_engine = create_engine(dsn, pool_pre_ping=True)
     return _station_config_engine
+
+
+def meteo_engine() -> Engine | None:
+    """Engine de meteo_data (DB de Fede, ADR-21), o None si METEO_DB_HOST no
+    está configurado. Solo lectura desde este backend."""
+    global _meteo_engine
+    if not config.METEO_DB_HOST:
+        return None
+    if _meteo_engine is None:
+        dsn = (
+            f"postgresql+psycopg2://{config.METEO_DB_USER}:{config.METEO_DB_PASSWORD}"
+            f"@{config.METEO_DB_HOST}:{config.METEO_DB_PORT}/{config.METEO_DB_NAME}"
+        )
+        _meteo_engine = create_engine(dsn, pool_pre_ping=True)
+    return _meteo_engine
 
 
 def ping(engine: Engine) -> dict[str, Any]:

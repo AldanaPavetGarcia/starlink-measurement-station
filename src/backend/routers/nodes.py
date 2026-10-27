@@ -62,8 +62,8 @@ def list_nodes(status_filter: str = Query("active", alias="status")) -> dict:
         last = last_metrics.get(node["node_id"])
         node["telemetry"] = {
             "last_starlink_metric": _iso(last) if last else None,
-            # meteo es dominio de Fede, no implementado todavía (ver
-            # docs/PROGRESS.md "Coordinación pendiente con Fede").
+            # meteo_data es la DB de Fede (ADR-21); quién expone este dato
+            # sigue abierto (ver ADR-21, "Consecuencias").
             "last_env_metric": None,
             "is_reporting": bool(last and (now - last) < _IS_REPORTING_WINDOW),
         }

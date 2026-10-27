@@ -11,15 +11,12 @@ tabla/hypertable ya la crea `init_starlink_health.sql` (create_hypertable no es
 algo que `Base.metadata.create_all()` sepa hacer), por eso nunca se llama
 `create_all()` acá.
 
-MeteoDB es un stub: el dominio ambiental es responsabilidad de Fede (CLAUDE.md
-§1.1) y su esquema (`env_metrics`, PK time+node_id+source) todavía no tiene
-implementación propia. Existe acá solo para que ConsumerRouter (router.py)
-pueda enrutar por dominio sin acoplarse a si meteo ya está implementado o no.
+El dominio meteo (`env_metrics` en `meteo_data`) no se persiste desde acá: desde
+ADR-21 tiene su propio consumer y su propia DB en `tesis-sensor-node`.
 """
 
 from __future__ import annotations
 
-import logging
 import os
 from datetime import datetime
 from typing import Any, Optional
@@ -27,8 +24,6 @@ from typing import Any, Optional
 from sqlalchemy import BigInteger, Boolean, DateTime, Engine, Float, SmallInteger, String, create_engine
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
-
-logger = logging.getLogger("consumer")
 
 
 class Base(DeclarativeBase):
@@ -92,13 +87,3 @@ class NetHealthDB:
     def dispose(self) -> None:
         self._engine.dispose()
 
-
-class MeteoDB:
-    """Stub del gateway de meteo_db. No persiste -- ver docstring del módulo."""
-
-    def insert(self, row: dict[str, Any]) -> None:
-        logger.warning(
-            "meteo_db.insert no implementado todavía (módulo de Fede), "
-            "mensaje descartado sin persistir",
-            extra={"node_id": row.get("node_id")},
-        )
