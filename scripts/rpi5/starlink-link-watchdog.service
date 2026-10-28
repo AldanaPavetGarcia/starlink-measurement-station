@@ -1,0 +1,8 @@
+[Unit]
+Description=Watchdog del enlace RPi5 - antena Starlink (reactiva eth0 si la antena no responde)
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/starlink-link-watchdog.sh
