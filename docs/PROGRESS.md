@@ -1708,3 +1708,37 @@ de esperar datos reales.
 **Pendiente:** corrida en la RPi5 con el ESP32 (runbook en
 `starlink-station-stack/docs/E2E_RPI5.md`), merge de las ramas de Fede, imágenes de Fede
 en GHCR, y decidir quién implementa `/metrics/env*`.
+
+### 2026-10-28 — Hueco de datos del 21/10 al 28/10 (RPi5 sin IPv4 hacia la antena) `[HW]`
+
+**Hueco en `network_metrics` (nodo `lit-cordoba-01`):** sin muestras entre
+**2026-10-21 11:02:26 UTC** (último dato) y **2026-10-28 19:19:38 UTC** (primer dato
+después de corregirlo), unos 7 días y 8 horas. Afecta también a la copia pública de la VM
+(el bridge solo replica lo que se publica). Hay que excluir ese intervalo, o marcarlo
+como sin datos, en cualquier análisis de la campaña (semana 22) y en el cálculo de
+disponibilidad/completitud.
+
+**Causa:** `eth0` (el cable al router de Starlink) se quedó sin dirección IPv4: solo tenía
+IPv6. NetworkManager pedía DHCP cada 5 minutos y registraba `dhcp4 (eth0): state
+changed no lease` al instante. Sin IPv4 no hay ruta a `192.168.100.1`, así que
+`acquisition` falló cada ciclo con `grpcurl ... Failed to dial target host
+"192.168.100.1:9200": context deadline exceeded`. Los 7 contenedores siguieron arriba
+y nada alertó. No era el disco (14% usado, 95 GB libres) ni la memoria. El origen del
+corte del 21/10 no se pudo confirmar: el journal de la RPi5 es volátil y solo conserva
+desde el reinicio del 25/10, y en ese reinicio tampoco consiguió IPv4. Lo más probable es
+un reinicio o actualización del router de Starlink.
+
+**Solución:** `nmcli con down/up "Conexión cableada 1"` (por SSH vía WiFi, sin cortar la
+sesión). `eth0` obtuvo `100.94.223.114/10` (CGNAT de Starlink), la antena respondió en
+~1 ms y el siguiente ciclo ya guardó datos.
+
+**Prevención:** watchdog en `scripts/rpi5/` (`starlink-link-watchdog.{sh,service,timer}`).
+Cada 5 minutos hace ping a la antena por `eth0`; si no responde y hay enlace físico,
+reactiva la conexión. Loguea en `journalctl -t starlink-link-watchdog`. Se instala con
+`bash scripts/rpi5/install-link-watchdog.sh`.
+
+**Pendiente:**
+- Alerta en Grafana si `network_metrics` pasa más de 15 min sin filas nuevas: esta vez
+  el corte pasó una semana sin que nadie lo notara.
+- Journal persistente en la RPi5 (`/var/log/journal`) para poder diagnosticar el
+  próximo corte.
